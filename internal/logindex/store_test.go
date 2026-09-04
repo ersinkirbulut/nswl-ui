@@ -13,7 +13,7 @@ import (
 
 func TestIngestAndIndexedSearch(t *testing.T) {
 	dir := t.TempDir()
-	store, err := Open(filepath.Join(dir, "index.db"))
+	store, err := Open(filepath.Join(dir, "index.db"), time.Local)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestIngestAndIndexedSearch(t *testing.T) {
 }
 
 func BenchmarkIndexedSearch100K(b *testing.B) {
-	store, err := Open(filepath.Join(b.TempDir(), "bench.db"))
+	store, err := Open(filepath.Join(b.TempDir(), "bench.db"), time.Local)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func BenchmarkIndexedSearch100K(b *testing.B) {
 
 func TestSeriesUsesMinuteAggregates(t *testing.T) {
 	dir := t.TempDir()
-	store, err := Open(filepath.Join(dir, "index.db"))
+	store, err := Open(filepath.Join(dir, "index.db"), time.Local)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,5 +118,30 @@ func TestSeriesUsesMinuteAggregates(t *testing.T) {
 	}
 	if series.Total != 1 || series.Peak != 1 || len(series.Points) != 15 {
 		t.Fatalf("unexpected series: %#v", series)
+	}
+}
+
+func TestSeriesAnchorsToLatestHistoricalData(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "index.db"), time.Local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	logPath := filepath.Join(dir, "historical.log")
+	line := `"2026-09-04 15:28:31|104.23.239.69|443|55438|-|151.250.12.216|HTTP/1.1|172.22.62.88|80|GET|/v1/banner|-|200|0|83|40371|Mozilla/5.0|-|-"` + "\n"
+	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.IngestFile(context.Background(), logPath); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 4, 18, 7, 0, 0, time.Local)
+	series, err := store.Series(context.Background(), now, time.Hour, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if series.Total != 1 || series.Peak != 1 {
+		t.Fatalf("historical series should contain latest data: %#v", series)
 	}
 }

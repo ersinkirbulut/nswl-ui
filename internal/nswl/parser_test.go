@@ -3,6 +3,7 @@ package nswl
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseCustomizedW3C(t *testing.T) {
@@ -20,6 +21,21 @@ func TestParseCustomizedW3C(t *testing.T) {
 	e := got[0]
 	if e.URI != "/api/health?verbose=1" || e.Duration != 42 || e.Status != 200 || e.UserAgent != "Mozilla/5.0 Test" {
 		t.Fatalf("unexpected entry: %#v", e)
+	}
+}
+
+func TestParseCustomTimestampInConfiguredLocation(t *testing.T) {
+	location, err := time.LoadLocation("Europe/Istanbul")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := `"2026-09-04 18:04:31|104.23.239.69|443|55438|-|151.250.12.216|HTTP/1.1|172.22.62.88|80|GET|/health|-|200|0|83|40371|Mozilla/5.0|-|-"`
+	entry, ok := ParseLineInLocation(line, location)
+	if !ok {
+		t.Fatal("line was not parsed")
+	}
+	if got := entry.Timestamp.UTC().Format("15:04:05"); got != "15:04:31" {
+		t.Fatalf("UTC time=%s, want 15:04:31", got)
 	}
 }
 

@@ -29,6 +29,11 @@ type Entry struct {
 // Parse reads W3C Extended logs. The #Fields directive determines the layout,
 // so customized NSWL configurations do not require code changes.
 func Parse(r io.Reader) ([]Entry, error) {
+	return ParseInLocation(r, time.Local)
+}
+
+// ParseInLocation parses timezone-less NSWL timestamps in loc.
+func ParseInLocation(r io.Reader, loc *time.Location) ([]Entry, error) {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 64*1024), 2*1024*1024)
 	var fields []string
@@ -46,7 +51,7 @@ func Parse(r io.Reader) ([]Entry, error) {
 			continue
 		}
 		if len(fields) == 0 && strings.Contains(line, "|") {
-			if entry, ok := ParseLine(line); ok {
+			if entry, ok := ParseLineInLocation(line, loc); ok {
 				entries = append(entries, entry)
 			}
 			continue
@@ -62,7 +67,7 @@ func Parse(r io.Reader) ([]Entry, error) {
 		for i, key := range fields {
 			m[strings.ToLower(key)] = dash(values[i])
 		}
-		entries = append(entries, normalize(m))
+		entries = append(entries, normalize(m, loc))
 	}
 	if err := s.Err(); err != nil {
 		return nil, err
@@ -76,14 +81,19 @@ func Parse(r io.Reader) ([]Entry, error) {
 // ParseLine parses one record from the headerless custom pipe format. It is
 // exported so the persistent indexer can process newly appended lines only.
 func ParseLine(line string) (Entry, bool) {
-	return parseNSWLPipe(line)
+	return ParseLineInLocation(line, time.Local)
+}
+
+// ParseLineInLocation parses one custom record using its configured log zone.
+func ParseLineInLocation(line string, loc *time.Location) (Entry, bool) {
+	return parseNSWLPipe(line, loc)
 }
 
 // parseNSWLPipe handles the common custom format produced with:
 // timestamp|ADC IP|server port|client port|user|forwarded client IP|protocol|
 // origin IP|origin port|method|URI|query|status|request bytes|response bytes|
 // duration usec|user agent/custom headers|referer|cookie.
-func parseNSWLPipe(line string) (Entry, bool) {
+func parseNSWLPipe(line string, loc *time.Location) (Entry, bool) {
 	line = strings.TrimSpace(line)
 	if len(line) >= 2 && line[0] == '"' && line[len(line)-1] == '"' {
 		line = line[1 : len(line)-1]
@@ -95,7 +105,7 @@ func parseNSWLPipe(line string) (Entry, bool) {
 	for i := range parts {
 		parts[i] = dash(strings.TrimSpace(parts[i]))
 	}
-	ts, err := time.ParseInLocation("2006-01-02 15:04:05", parts[0], time.Local)
+	ts, err := time.ParseInLocation("2006-01-02 15:04:05", parts[0], loc)
 	if err != nil {
 		return Entry{}, false
 	}
@@ -153,7 +163,7 @@ func splitW3C(line string) []string {
 	return out
 }
 
-func normalize(m map[string]string) Entry {
+func normalize(m map[string]string, loc *time.Location) Entry {
 	e := Entry{Fields: m}
 	e.ClientIP = first(m, "c-ip", "cs-ip", "client-ip")
 	e.ServerIP = first(m, "s-ip", "server-ip")
@@ -177,7 +187,7 @@ func normalize(m map[string]string) Entry {
 	d := first(m, "date")
 	t := first(m, "time")
 	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04:05.000", time.RFC3339} {
-		if parsed, err := time.ParseInLocation(layout, strings.TrimSpace(d+" "+t), time.Local); err == nil {
+		if parsed, err := time.ParseInLocation(layout, strings.TrimSpace(d+" "+t), loc); err == nil {
 			e.Timestamp = parsed
 			break
 		}

@@ -10,7 +10,10 @@ NetScaler Web Logging (NSWL) W3C logları için hafif, salt-okunur bir web aray�
 {
   "bind": "127.0.0.1",
   "port": 8080,
-  "log_path": "./logs"
+  "log_path": "./logs",
+  "database_path": "./data/nswl.db",
+  "index_interval_seconds": 2,
+  "log_timezone": "Europe/Istanbul"
 }
 ```
 
@@ -51,6 +54,8 @@ Loglar arama sırasında bellekte taranmaz. Uygulama arka planda SQLite/FTS5 ind
 - SQLite WAL modu kullanılır ve ayrıca bir veritabanı servisi kurulması gerekmez.
 
 İlk kurulumda mevcut dosyalar arka planda indekslenir. Sonraki açılışlarda kayıtlı byte konumundan devam edilir.
+
+NSWL zaman damgaları timezone içermediği için `log_timezone` logların üretildiği bölgeyi belirtir. Bu değer değiştiğinde veya indeks şeması güncellendiğinde türetilmiş indeks log dosyalarından otomatik olarak yeniden oluşturulur.
 
 ## Rocky Linux kurulumu ve güncelleme
 

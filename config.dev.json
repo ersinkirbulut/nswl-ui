@@ -3,5 +3,6 @@
   "port": 18080,
   "log_path": "./logs",
   "database_path": "./data/nswl-dev-v2.db",
-  "index_interval_seconds": 2
+  "index_interval_seconds": 2,
+  "log_timezone": "Europe/Istanbul"
 }

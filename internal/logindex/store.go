@@ -18,7 +18,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Store struct{ db *sql.DB }
+const schemaVersion = 2
+
+type Store struct {
+	db       *sql.DB
+	location *time.Location
+}
 
 const (
 	ingestBatchSize  = 500
@@ -50,7 +55,7 @@ type SearchResult struct {
 	Count int64        `json:"count"`
 }
 
-func Open(path string) (*Store, error) {
+func Open(path string, location *time.Location) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, err
@@ -63,7 +68,10 @@ func Open(path string) (*Store, error) {
 	// A single connection keeps PRAGMAs consistent. Ingestion commits small
 	// batches, so interactive reads are only paused for a few milliseconds.
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	if location == nil {
+		location = time.Local
+	}
+	s := &Store{db: db, location: location}
 	if err := s.init(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -74,11 +82,32 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) init() error {
-	_, err := s.db.Exec(`
+	if _, err := s.db.Exec(`
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
 PRAGMA busy_timeout=5000;
 PRAGMA temp_store=MEMORY;
+`); err != nil {
+		return err
+	}
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version != schemaVersion {
+		if _, err := s.db.Exec(`
+DROP TRIGGER IF EXISTS requests_ai;
+DROP TRIGGER IF EXISTS requests_ad;
+DROP TABLE IF EXISTS request_search;
+DROP TABLE IF EXISTS requests;
+DROP TABLE IF EXISTS sources;
+DROP TABLE IF EXISTS totals;
+DROP TABLE IF EXISTS minute_stats;
+`); err != nil {
+			return fmt.Errorf("reset derived index: %w", err)
+		}
+	}
+	_, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS requests (
   id INTEGER PRIMARY KEY,
   ts INTEGER NOT NULL,
@@ -113,6 +142,10 @@ CREATE TABLE IF NOT EXISTS minute_stats (
   bytes INTEGER NOT NULL, duration_total REAL NOT NULL
 );
 `)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion))
 	return err
 }
 
@@ -166,7 +199,7 @@ func (s *Store) IngestFile(ctx context.Context, path string) (int, error) {
 			return ingested, readErr
 		}
 		batchOffset += int64(len(line))
-		if entry, ok := nswl.ParseLine(line); ok {
+		if entry, ok := nswl.ParseLineInLocation(line, s.location); ok {
 			batch = append(batch, entry)
 		}
 		if len(batch) >= ingestBatchSize {
@@ -325,6 +358,19 @@ func (s *Store) Search(ctx context.Context, query, status string, limit int) (Se
 func (s *Store) Series(ctx context.Context, now time.Time, span, bucket time.Duration) (TimeSeries, error) {
 	end := now.Truncate(bucket).Add(bucket)
 	start := end.Add(-span)
+	var latest sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT max(bucket) FROM minute_stats`).Scan(&latest); err != nil {
+		return TimeSeries{}, err
+	}
+	if latest.Valid {
+		latestTime := time.Unix(latest.Int64, 0).In(now.Location())
+		// Historical files and timezone mistakes should still produce a useful
+		// chart. Live data within the selected window remains anchored to now.
+		if latestTime.Before(start) || !latestTime.Before(end) {
+			end = latestTime.Truncate(bucket).Add(bucket)
+			start = end.Add(-span)
+		}
+	}
 	series := TimeSeries{Points: make([]TimePoint, int(span/bucket)), BucketSeconds: int(bucket.Seconds())}
 	for i := range series.Points {
 		series.Points[i].Timestamp = start.Add(time.Duration(i) * bucket)

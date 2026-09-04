@@ -61,7 +61,7 @@ mv -f -- "${INSTALL_PATH}.new" "${INSTALL_PATH}"
 install -d -m 0755 "${CONFIG_DIR}"
 if [[ -n "${LOG_PATH}" ]]; then
   CONFIG_TMP="$(mktemp "${TMPDIR:-/tmp}/nswl-ui-config.XXXXXX")"
-  printf '{\n  "bind": "0.0.0.0",\n  "port": %s,\n  "log_path": "%s",\n  "database_path": "/var/lib/nswl-ui/nswl.db",\n  "index_interval_seconds": 2\n}\n' "${PORT}" "${LOG_PATH}" >"${CONFIG_TMP}"
+  printf '{\n  "bind": "0.0.0.0",\n  "port": %s,\n  "log_path": "%s",\n  "database_path": "/var/lib/nswl-ui/nswl.db",\n  "index_interval_seconds": 2,\n  "log_timezone": "Europe/Istanbul"\n}\n' "${PORT}" "${LOG_PATH}" >"${CONFIG_TMP}"
   install -m 0644 "${CONFIG_TMP}" "${CONFIG_PATH}"
   say "Config oluşturuldu: ${CONFIG_PATH}"
 else

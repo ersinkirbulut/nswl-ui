@@ -61,16 +61,16 @@ async function series(){const r=await fetch('/api/timeseries?range='+$('#chartRa
 function drawChart(points){
   const canvas=$('#trafficChart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(box.width,320),h=box.height;
   canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
-  const pad={l:48,r:14,t:14,b:30},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b,peak=Math.max(1,...points.map(p=>p.count));
+  const pad={l:48,r:14,t:14,b:30},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b,actualPeak=Math.max(0,...points.map(p=>p.count)),peak=Math.max(1,actualPeak);
   c.font='11px system-ui';c.textBaseline='middle';c.fillStyle='#98a2b3';c.strokeStyle='#e8edf4';c.lineWidth=1;
-  for(let i=0;i<4;i++){const y=pad.t+ch*i/3;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();const label=Math.round(peak*(1-i/3));c.textAlign='right';c.fillText(fmt.format(label),pad.l-10,y)}
+  for(let i=0;i<4;i++){const y=pad.t+ch*i/3;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();if(actualPeak>0||i===3){const label=actualPeak?Math.ceil(actualPeak*(1-i/3)):0;c.textAlign='right';c.fillText(fmt.format(label),pad.l-10,y)}}
   if(!points.length)return;
   const xy=points.map((p,i)=>[pad.l+(points.length===1?0:i/(points.length-1))*cw,pad.t+ch-(p.count/peak)*ch]);
   const gradient=c.createLinearGradient(0,pad.t,0,pad.t+ch);gradient.addColorStop(0,'rgba(37,99,235,.28)');gradient.addColorStop(1,'rgba(37,99,235,0)');
   c.beginPath();c.moveTo(xy[0][0],pad.t+ch);xy.forEach(([x,y])=>c.lineTo(x,y));c.lineTo(xy.at(-1)[0],pad.t+ch);c.closePath();c.fillStyle=gradient;c.fill();
   c.beginPath();xy.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.strokeStyle='#2563eb';c.lineWidth=2.5;c.lineJoin='round';c.stroke();
   c.fillStyle='#667085';c.textAlign='center';c.textBaseline='top';const ticks=[0,.25,.5,.75,1];ticks.forEach(t=>{const i=Math.min(Math.round((points.length-1)*t),points.length-1),x=pad.l+t*cw;c.fillText(new Date(points[i].timestamp).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}),x,pad.t+ch+10)});
-  if(Math.max(...points.map(p=>p.count))===0){c.fillStyle='#98a2b3';c.textAlign='center';c.textBaseline='middle';c.fillText('Bu zaman aralığında istek yok',pad.l+cw/2,pad.t+ch/2)}
+  if(actualPeak===0){c.fillStyle='#98a2b3';c.textAlign='center';c.textBaseline='middle';c.fillText('Bu zaman aralığında istek yok',pad.l+cw/2,pad.t+ch/2)}
 }
 let searchController;
 async function logs(){const q=$('#query').value.trim();if(q&&[...q].length<3){$('#count').textContent='Hızlı arama için en az 3 karakter girin';return}searchController?.abort();searchController=new AbortController();const p=new URLSearchParams({q,status:$('#status').value});$('#count').textContent=q?'İndekste aranıyor…':'Son kayıtlar yükleniyor…';try{const r=await fetch('/api/logs?'+p,{signal:searchController.signal}),d=await r.json();if(!r.ok)throw new Error(d.error||'Arama başarısız');$('#count').textContent=`${fmt.format(d.count)} eşleşme · en yeni ${fmt.format(d.items.length)} kayıt`;$('#rows').innerHTML=d.items.length?d.items.map(x=>`<tr><td class="text-nowrap text-secondary">${x.timestamp?.startsWith('0001')?'—':new Date(x.timestamp).toLocaleString('tr-TR')}</td><td><div class="fw-medium">${esc(x.client_ip)||'—'}</div><small class="text-secondary">${esc(x.host)}</small></td><td><span class="method">${esc(x.method)||'—'}</span> <span title="${esc(x.uri)}">${esc(x.uri)||'—'}</span></td><td><span class="badge ${badge(x.status)}">${x.status||'—'}</span></td><td class="text-nowrap">${Math.round(x.duration_ms)} ms</td><td class="text-nowrap">${size(x.bytes)}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty"><p class="empty-title">Henüz eşleşen kayıt yok</p><p class="empty-subtitle text-secondary">Arama ifadesini veya filtreleri kontrol edin.</p></div></td></tr>`}catch(e){if(e.name!=='AbortError')$('#count').textContent='Arama hatası: '+e.message}}

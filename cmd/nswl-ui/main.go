@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"nswl-ui/internal/logindex"
 )
@@ -36,6 +37,7 @@ type config struct {
 	Bind                 string `json:"bind"`
 	DatabasePath         string `json:"database_path"`
 	IndexIntervalSeconds int    `json:"index_interval_seconds"`
+	LogTimezone          string `json:"log_timezone"`
 }
 
 func main() {
@@ -45,7 +47,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("configuration: %v", err)
 	}
-	store, err := logindex.Open(cfg.DatabasePath)
+	location, err := time.LoadLocation(cfg.LogTimezone)
+	if err != nil {
+		log.Fatalf("load log timezone %q: %v", cfg.LogTimezone, err)
+	}
+	store, err := logindex.Open(cfg.DatabasePath, location)
 	if err != nil {
 		log.Fatalf("open index: %v", err)
 	}
@@ -88,7 +94,7 @@ func main() {
 }
 
 func loadConfig(path string) (config, error) {
-	cfg := config{Bind: "127.0.0.1", Port: 8080, LogPath: "./logs", DatabasePath: "/var/lib/nswl-ui/nswl.db", IndexIntervalSeconds: 2}
+	cfg := config{Bind: "127.0.0.1", Port: 8080, LogPath: "./logs", DatabasePath: "/var/lib/nswl-ui/nswl.db", IndexIntervalSeconds: 2, LogTimezone: "Europe/Istanbul"}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return config{}, fmt.Errorf("read %s: %w", path, err)
@@ -107,6 +113,9 @@ func loadConfig(path string) (config, error) {
 	}
 	if cfg.IndexIntervalSeconds < 1 || cfg.IndexIntervalSeconds > 300 {
 		return config{}, fmt.Errorf("index_interval_seconds must be between 1 and 300")
+	}
+	if strings.TrimSpace(cfg.LogTimezone) == "" {
+		return config{}, fmt.Errorf("log_timezone cannot be empty")
 	}
 	if cfg.Bind == "" {
 		cfg.Bind = "127.0.0.1"
