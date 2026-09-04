@@ -41,31 +41,34 @@ Farklı bir config dosyası gerekirse `./nswl-ui -config /dosya/config.json` kul
 
 Uygulama dosya boyutu ve değişiklik zamanına göre bellekte snapshot tutar. Rotasyondaki değişmeyen büyük dosyalar her yenilemede tekrar parse edilmez; yalnızca aktif veya değişmiş dosyalar okunur. Çok yüksek hacim ve uzun saklama süreleri için sonraki adım kalıcı SQLite indeksidir.
 
-## Rocky Linux kurulumu
+## Rocky Linux kurulumu ve güncelleme
 
-Rocky Linux sunucusunda Go 1.22+ kuruluysa binary'yi doğrudan üretin:
+İlk kurulumda yalnızca log klasörünün tam yolunu verin:
 
 ```sh
-go build -trimpath -ldflags='-s -w' -o nswl-ui ./cmd/nswl-ui
-sudo install -m 0755 nswl-ui /usr/local/bin/nswl-ui
+chmod +x install.sh
+sudo ./install.sh /nswl/log/klasoru
 ```
 
-Ayrı, shell erişimi olmayan servis kullanıcısını ve yapılandırmayı oluşturun:
+Farklı bir port istenirse ikinci parametre olarak verilebilir:
 
 ```sh
-sudo useradd --system --no-create-home --shell /sbin/nologin nswl-ui
-sudo install -m 0644 deploy/nswl-ui.service /etc/systemd/system/nswl-ui.service
-sudo install -d -m 0755 /etc/nswl-ui
-sudo install -m 0644 deploy/config.rocky.json /etc/nswl-ui/config.json
-sudo vi /etc/nswl-ui/config.json
+sudo ./install.sh /nswl/log/klasoru 9090
 ```
 
-`/etc/nswl-ui/config.json` içindeki `log_path` değerini gerçek NSWL klasörüne ayarladıktan sonra:
+Script testleri çalıştırır, yeni binary'yi derler, servis kullanıcısını ve config'i oluşturur, systemd servisini kurup başlatır. Ayrı env dosyası kullanılmaz.
+
+Sonraki kod güncellemelerinde mevcut config korunur; yalnızca şunu çalıştırmak yeterlidir:
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now nswl-ui
+sudo ./install.sh
+```
+
+Servis yönetimi ve log takibi:
+
+```sh
 sudo systemctl status nswl-ui
+sudo systemctl restart nswl-ui
 sudo journalctl -u nswl-ui -f
 ```
 
