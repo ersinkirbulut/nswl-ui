@@ -21,3 +21,17 @@ func TestDiscoverRotatedLogFiles(t *testing.T) {
 		t.Fatalf("got %d files: %v", len(paths), paths)
 	}
 }
+
+func TestLoadConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"bind":"0.0.0.0","port":9090,"log_path":"/var/log/nswl"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Bind != "0.0.0.0" || cfg.Port != 9090 || cfg.LogPath != "/var/log/nswl" {
+		t.Fatalf("unexpected config: %#v", cfg)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log"
@@ -40,13 +41,20 @@ type overview struct {
 	Updated  time.Time `json:"updated"`
 }
 
+type config struct {
+	Port    int    `json:"port"`
+	LogPath string `json:"log_path"`
+	Bind    string `json:"bind"`
+}
+
 func main() {
-	logPath := env("NSWL_LOG_PATH", "./logs")
-	// Keep the configuration from the first prototype working.
-	if legacy := os.Getenv("NSWL_LOG_GLOB"); legacy != "" {
-		logPath = legacy
+	configPath := flag.String("config", "config.json", "configuration file")
+	flag.Parse()
+	cfg, err := loadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("configuration: %v", err)
 	}
-	a := &app{logPath: logPath, files: make(map[string]cachedFile)}
+	a := &app{logPath: cfg.LogPath, files: make(map[string]cachedFile)}
 	mux := http.NewServeMux()
 	web, _ := fs.Sub(assets, "web")
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(web))))
@@ -62,9 +70,30 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /api/overview", a.handleOverview)
 	mux.HandleFunc("GET /api/logs", a.handleLogs)
-	addr := env("NSWL_ADDR", ":8080")
+	addr := fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port)
 	log.Printf("NSWL UI listening on %s (logs: %s)", addr, a.logPath)
 	log.Fatal(http.ListenAndServe(addr, securityHeaders(mux)))
+}
+
+func loadConfig(path string) (config, error) {
+	cfg := config{Bind: "127.0.0.1", Port: 8080, LogPath: "./logs"}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return config{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return config{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return config{}, fmt.Errorf("port must be between 1 and 65535")
+	}
+	if strings.TrimSpace(cfg.LogPath) == "" {
+		return config{}, fmt.Errorf("log_path cannot be empty")
+	}
+	if cfg.Bind == "" {
+		cfg.Bind = "127.0.0.1"
+	}
+	return cfg, nil
 }
 
 func (a *app) load() ([]nswl.Entry, error) {
@@ -214,12 +243,6 @@ func respond(w http.ResponseWriter, v any) {
 }
 func problem(w http.ResponseWriter, err error) {
 	http.Error(w, fmt.Sprintf(`{"error":%q}`, err), http.StatusInternalServerError)
-}
-func env(k, fallback string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return fallback
 }
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

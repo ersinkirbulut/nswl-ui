@@ -4,17 +4,24 @@ NetScaler Web Logging (NSWL) W3C logları için hafif, salt-okunur bir web aray�
 
 ## Çalıştırma
 
-Go 1.22+ ile:
+`config.json` dosyasındaki portu ve log klasörünü düzenleyin:
 
-```sh
-NSWL_LOG_PATH='/var/log/nswl' go run ./cmd/nswl-ui
+```json
+{
+  "bind": "127.0.0.1",
+  "port": 8080,
+  "log_path": "./logs"
+}
 ```
 
-Ardından `http://localhost:8080` adresini açın. Varsayılan log klasörü `./logs`, dinleme adresi `:8080`'dir. Klasördeki `.txt`, `.log` ve NSWL rotasyon dosyaları (`.log.0`, `.log.1`, …) alt klasörler dahil otomatik bulunur.
+Ardından bir kez build edip doğrudan çalıştırın:
 
 ```sh
-NSWL_ADDR='127.0.0.1:9090' NSWL_LOG_PATH='/data/nswl' go run ./cmd/nswl-ui
+go build -o nswl-ui ./cmd/nswl-ui
+./nswl-ui
 ```
+
+Arayüz `http://127.0.0.1:8080` adresindedir. Klasördeki `.txt`, `.log` ve NSWL rotasyon dosyaları (`.log.0`, `.log.1`, …) alt klasörler dahil otomatik bulunur.
 
 Parser iki biçimi otomatik tanır:
 
@@ -30,14 +37,7 @@ go test ./...
 go build -o nswl-ui ./cmd/nswl-ui
 ```
 
-## Yapılandırma
-
-| Değişken | Varsayılan | Açıklama |
-|---|---|---|
-| `NSWL_LOG_PATH` | `./logs` | Log klasörü, tek dosya veya glob ifadesi |
-| `NSWL_ADDR` | `:8080` | HTTP dinleme adresi |
-
-Eski `NSWL_LOG_GLOB` değişkeni geriye dönük uyumluluk için hâlâ desteklenir.
+Farklı bir config dosyası gerekirse `./nswl-ui -config /dosya/config.json` kullanılabilir.
 
 Uygulama dosya boyutu ve değişiklik zamanına göre bellekte snapshot tutar. Rotasyondaki değişmeyen büyük dosyalar her yenilemede tekrar parse edilmez; yalnızca aktif veya değişmiş dosyalar okunur. Çok yüksek hacim ve uzun saklama süreleri için sonraki adım kalıcı SQLite indeksidir.
 
@@ -55,11 +55,12 @@ Ayrı, shell erişimi olmayan servis kullanıcısını ve yapılandırmayı olu�
 ```sh
 sudo useradd --system --no-create-home --shell /sbin/nologin nswl-ui
 sudo install -m 0644 deploy/nswl-ui.service /etc/systemd/system/nswl-ui.service
-sudo install -m 0644 deploy/nswl-ui.env.example /etc/nswl-ui.env
-sudo vi /etc/nswl-ui.env
+sudo install -d -m 0755 /etc/nswl-ui
+sudo install -m 0644 deploy/config.rocky.json /etc/nswl-ui/config.json
+sudo vi /etc/nswl-ui/config.json
 ```
 
-`/etc/nswl-ui.env` içindeki `NSWL_LOG_PATH` değerini gerçek NSWL klasörüne ayarladıktan sonra:
+`/etc/nswl-ui/config.json` içindeki `log_path` değerini gerçek NSWL klasörüne ayarladıktan sonra:
 
 ```sh
 sudo systemctl daemon-reload
