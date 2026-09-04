@@ -32,6 +32,12 @@ type app struct {
 	indexing atomic.Bool
 }
 
+type logCandidate struct {
+	path    string
+	modTime time.Time
+	live    bool
+}
+
 type config struct {
 	Port                 int    `json:"port"`
 	LogPath              string `json:"log_path"`
@@ -149,30 +155,59 @@ func (a *app) syncLogs(ctx context.Context) {
 		log.Printf("index scan: %v", err)
 		return
 	}
-	sort.SliceStable(paths, func(i, j int) bool {
-		return isActiveLog(paths[i]) && !isActiveLog(paths[j])
-	})
+	candidates := prioritizeLogFiles(paths)
 	indexed := 0
-	for _, path := range paths {
-		limit := 500
-		if isActiveLog(path) {
-			limit = 5000
+	backfillBudget := 1000
+	for _, candidate := range candidates {
+		limit := 5000
+		if !candidate.live {
+			if backfillBudget <= 0 {
+				break
+			}
+			limit = backfillBudget
 		}
-		count, err := a.store.IngestFileLimit(ctx, path, limit)
+		count, err := a.store.IngestFileLimit(ctx, candidate.path, limit)
 		if err != nil {
-			log.Printf("index %s: %v", path, err)
+			log.Printf("index %s: %v", candidate.path, err)
 			continue
 		}
 		indexed += count
+		if !candidate.live {
+			backfillBudget -= count
+		}
 	}
 	if indexed > 0 {
-		log.Printf("indexed %d new requests from %d files", indexed, len(paths))
+		log.Printf("indexed %d new requests from %d files", indexed, len(candidates))
 	}
 }
 
-func isActiveLog(path string) bool {
-	name := strings.ToLower(filepath.Base(path))
-	return strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".txt")
+func prioritizeLogFiles(paths []string) []logCandidate {
+	candidates := make([]logCandidate, 0, len(paths))
+	var newest time.Time
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		candidate := logCandidate{path: path, modTime: info.ModTime()}
+		candidates = append(candidates, candidate)
+		if candidate.modTime.After(newest) {
+			newest = candidate.modTime
+		}
+	}
+	// Multiple virtual servers may write concurrently. Files modified within
+	// one minute of the newest file are all treated as live.
+	cutoff := newest.Add(-time.Minute)
+	for i := range candidates {
+		candidates[i].live = !candidates[i].modTime.Before(cutoff)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].live != candidates[j].live {
+			return candidates[i].live
+		}
+		return candidates[i].modTime.After(candidates[j].modTime)
+	})
+	return candidates
 }
 
 func discoverLogFiles(path string) ([]string, error) {
@@ -288,6 +323,7 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
 }

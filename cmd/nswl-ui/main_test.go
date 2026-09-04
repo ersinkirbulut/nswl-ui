@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDiscoverRotatedLogFiles(t *testing.T) {
@@ -22,12 +23,26 @@ func TestDiscoverRotatedLogFiles(t *testing.T) {
 	}
 }
 
-func TestActiveLogDetection(t *testing.T) {
-	if !isActiveLog("/var/log/nswl/Ex260904.log") {
-		t.Fatal("current .log file should be active")
+func TestNewestRotatedFileIsPrioritized(t *testing.T) {
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "Ex260904.log")
+	livePath := filepath.Join(dir, "Ex260904.log.18")
+	for _, path := range []string{oldPath, livePath} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if isActiveLog("/var/log/nswl/Ex260904.log.0") {
-		t.Fatal("rotated .log.0 file should be backfill")
+	oldTime := time.Date(2026, 9, 4, 15, 18, 0, 0, time.Local)
+	liveTime := oldTime.Add(4*time.Hour + 22*time.Minute)
+	if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(livePath, liveTime, liveTime); err != nil {
+		t.Fatal(err)
+	}
+	got := prioritizeLogFiles([]string{oldPath, livePath})
+	if len(got) != 2 || got[0].path != livePath || !got[0].live || got[1].live {
+		t.Fatalf("unexpected priority: %#v", got)
 	}
 }
 
