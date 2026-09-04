@@ -1,0 +1,28 @@
+[Unit]
+Description=NSWL Lens web interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nswl-ui
+Group=nswl-ui
+EnvironmentFile=/etc/nswl-ui.env
+ExecStart=/usr/local/bin/nswl-ui
+Restart=on-failure
+RestartSec=3s
+
+# Basic service hardening. NSWL Lens only needs to read logs and bind a high port.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

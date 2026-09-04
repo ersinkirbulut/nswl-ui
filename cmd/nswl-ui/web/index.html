@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NSWL Lens</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" rel="stylesheet">
+  <link href="/assets/style.css" rel="stylesheet">
+</head>
+<body>
+<div class="page">
+  <header class="navbar navbar-expand-md d-print-none glass"><div class="container-xl">
+    <a class="navbar-brand navbar-brand-autodark"><span class="brand-mark">N</span> NSWL <span class="text-secondary ms-1">Lens</span></a>
+    <div class="navbar-nav flex-row order-md-last"><span class="status status-green"><span class="status-dot status-dot-animated"></span>Canlı</span></div>
+  </div></header>
+  <div class="page-wrapper">
+    <div class="page-header d-print-none"><div class="container-xl"><div class="row g-2 align-items-center">
+      <div class="col"><div class="page-pretitle">NetScaler Web Logging</div><h2 class="page-title">Trafiğe genel bakış</h2></div>
+      <div class="col-auto text-secondary small" id="updated">Yükleniyor…</div>
+    </div></div></div>
+    <div class="page-body"><div class="container-xl">
+      <div class="row row-deck row-cards mb-4" id="metrics">
+        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Toplam istek</div><div class="value" data-k="requests">—</div><div class="hint">Okunan log kayıtları</div></div></div></div>
+        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Hatalar</div><div class="value text-red" data-k="errors">—</div><div class="hint">HTTP 4xx ve 5xx</div></div></div></div>
+        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Ort. yanıt</div><div class="value"><span data-k="avg_ms">—</span><small> ms</small></div><div class="hint">İşlem süresi</div></div></div></div>
+        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Aktarılan</div><div class="value" data-k="bytes">—</div><div class="hint">Sunucudan istemciye</div></div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Son istekler</h3><div class="card-actions"><button class="btn btn-ghost-secondary btn-sm" id="refresh">Yenile</button></div></div>
+        <div class="card-body border-bottom py-3"><div class="d-flex gap-2 flex-wrap">
+          <div class="input-icon flex-fill search"><span class="input-icon-addon">⌕</span><input id="query" class="form-control" placeholder="IP, host, URI veya user-agent ara…"></div>
+          <select id="status" class="form-select w-auto"><option value="">Tüm durumlar</option><option value="2xx">Başarılı (2xx)</option><option value="errors">Hatalar (4xx/5xx)</option></select>
+        </div></div>
+        <div class="table-responsive"><table class="table table-vcenter card-table table-hover"><thead><tr><th>Zaman</th><th>İstemci</th><th>İstek</th><th>Durum</th><th>Süre</th><th>Boyut</th></tr></thead><tbody id="rows"></tbody></table></div>
+        <div class="card-footer text-secondary" id="count">Kayıtlar yükleniyor…</div>
+      </div>
+    </div></div>
+  </div>
+</div>
+<script>
+const $=s=>document.querySelector(s), fmt=new Intl.NumberFormat('tr-TR');
+const size=n=>{if(!n)return '0 B';const u=['B','KB','MB','GB'],i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3);return `${(n/1024**i).toFixed(i?1:0)} ${u[i]}`};
+const badge=s=>s>=500?'bg-red-lt':s>=400?'bg-orange-lt':s>=300?'bg-azure-lt':'bg-green-lt';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function overview(){const r=await fetch('/api/overview'),d=await r.json();for(const k of ['requests','errors'])document.querySelector(`[data-k=${k}]`).textContent=fmt.format(d[k]);$('[data-k=avg_ms]').textContent=fmt.format(Math.round(d.avg_ms));$('[data-k=bytes]').textContent=size(d.bytes);$('#updated').textContent='Son güncelleme '+new Date(d.updated).toLocaleTimeString('tr-TR')}
+async function logs(){const p=new URLSearchParams({q:$('#query').value,status:$('#status').value});const r=await fetch('/api/logs?'+p),d=await r.json();$('#count').textContent=`${fmt.format(d.count)} kayıt gösteriliyor`;$('#rows').innerHTML=d.items.length?d.items.map(x=>`<tr><td class="text-nowrap text-secondary">${x.timestamp?.startsWith('0001')?'—':new Date(x.timestamp).toLocaleString('tr-TR')}</td><td><div class="fw-medium">${esc(x.client_ip)||'—'}</div><small class="text-secondary">${esc(x.host)}</small></td><td><span class="method">${esc(x.method)||'—'}</span> <span title="${esc(x.uri)}">${esc(x.uri)||'—'}</span></td><td><span class="badge ${badge(x.status)}">${x.status||'—'}</span></td><td class="text-nowrap">${Math.round(x.duration_ms)} ms</td><td class="text-nowrap">${size(x.bytes)}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty"><p class="empty-title">Henüz eşleşen kayıt yok</p><p class="empty-subtitle text-secondary">Log yolunu veya filtreleri kontrol edin.</p></div></td></tr>`}
+async function load(){try{await Promise.all([overview(),logs()])}catch(e){$('#count').textContent='Veri alınamadı: '+e.message}}
+let timer;$('#query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(logs,250)});$('#status').addEventListener('change',logs);$('#refresh').addEventListener('click',load);load();setInterval(load,15000);
+</script>
+</body></html>
