@@ -63,6 +63,13 @@ func TestIngestAndIndexedSearch(t *testing.T) {
 	if overview.Requests != 2 || overview.Errors != 1 || overview.Bytes != 259 {
 		t.Fatalf("unexpected overview: %#v", overview)
 	}
+	lagged, err := store.Overview(ctx, now.Add(2*time.Minute+30*time.Second), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lagged.IndexLagSeconds != 150 {
+		t.Fatalf("unexpected index lag: got %d seconds, want 150", lagged.IndexLagSeconds)
+	}
 	analytics, err := store.Analytics(ctx, now, time.Hour)
 	if err != nil {
 		t.Fatal(err)

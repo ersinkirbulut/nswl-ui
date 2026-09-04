@@ -32,13 +32,14 @@ const (
 )
 
 type Overview struct {
-	Requests  int64     `json:"requests"`
-	Errors    int64     `json:"errors"`
-	Bytes     int64     `json:"bytes"`
-	AvgMS     float64   `json:"avg_ms"`
-	ErrorRate float64   `json:"error_rate"`
-	RPS       float64   `json:"rps"`
-	Updated   time.Time `json:"updated"`
+	Requests        int64     `json:"requests"`
+	Errors          int64     `json:"errors"`
+	Bytes           int64     `json:"bytes"`
+	AvgMS           float64   `json:"avg_ms"`
+	ErrorRate       float64   `json:"error_rate"`
+	RPS             float64   `json:"rps"`
+	IndexLagSeconds int64     `json:"index_lag_seconds"`
+	Updated         time.Time `json:"updated"`
 }
 
 type TimePoint struct {
@@ -456,6 +457,15 @@ func (s *Store) Overview(ctx context.Context, now time.Time, span time.Duration)
 		return o, err
 	}
 	_ = s.db.QueryRowContext(ctx, `SELECT updated_at FROM totals WHERE id=1`).Scan(&updated)
+	var latest sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT max(bucket) FROM minute_stats`).Scan(&latest); err == nil && latest.Valid {
+		// Minute aggregates only provide minute precision. Consider the latest
+		// minute current until its final second has passed.
+		lag := now.Sub(time.Unix(latest.Int64, 0).In(now.Location()).Add(time.Minute))
+		if lag > 0 {
+			o.IndexLagSeconds = int64(lag.Seconds())
+		}
+	}
 	if o.Requests > 0 {
 		o.AvgMS = duration / float64(o.Requests)
 		o.ErrorRate = float64(o.Errors) * 100 / float64(o.Requests)

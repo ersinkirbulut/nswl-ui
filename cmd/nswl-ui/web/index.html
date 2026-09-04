@@ -11,7 +11,7 @@
 <div class="page">
   <header class="navbar navbar-expand-md glass"><div class="container-xl">
     <a class="navbar-brand"><span class="brand-mark">N</span><span>NSWL <span class="text-secondary">Lens</span></span></a>
-    <div class="d-flex align-items-center gap-3"><span class="status status-green" title="Dashboard otomatik yenilenir"><span class="status-dot status-dot-animated"></span><span id="liveStatus">Canlı · 5 sn</span></span><span class="text-secondary small d-none d-md-inline" id="updated">Yükleniyor…</span></div>
+    <div class="d-flex align-items-center gap-3"><span class="status status-green" id="liveBadge" title="Dashboard otomatik yenilenir"><span class="status-dot status-dot-animated"></span><span id="liveStatus">Canlı · 5 sn</span></span><span class="text-secondary small d-none d-md-inline" id="updated">Yükleniyor…</span></div>
   </div></header>
   <main class="page-wrapper">
     <div class="page-header"><div class="container-xl"><div class="row g-3 align-items-end">
@@ -30,7 +30,7 @@
       </div>
 
       <div class="card traffic-card mb-4">
-        <div class="card-header"><div><h2 class="card-title">İstek ve hata trendi</h2><div class="text-secondary small mt-1" id="chartSubtitle">Dakikalık trafik</div></div><div class="traffic-meta"><div class="legend"><span class="legend-dot requests"></span>İstek</div><div class="legend"><span class="legend-dot errors"></span>Hata</div><div class="chart-stat"><strong id="chartPeak">—</strong><span>zirve</span></div></div></div>
+        <div class="card-header"><div><h2 class="card-title">İstek ve hata trendi</h2><div class="text-secondary small mt-1" id="chartSubtitle">Dakikalık trafik</div></div><div class="traffic-meta"><div class="traffic-legend"><span class="legend-dot requests"></span>İstek</div><div class="traffic-legend"><span class="legend-dot errors"></span>Hata</div><div class="chart-stat"><strong id="chartPeak">—</strong><span>zirve</span></div></div></div>
         <div class="card-body chart-body"><canvas id="trafficChart" role="img" aria-label="Zamana göre istek ve hata grafiği"></canvas></div>
       </div>
 
@@ -60,10 +60,10 @@ const size=n=>{if(!n)return'0 B';const u=['B','KB','MB','GB','TB'],i=Math.min(Ma
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const statusBadge=s=>s>=500?'bg-red-lt':s>=400?'bg-orange-lt':s>=300?'bg-azure-lt':'bg-green-lt';
 const empty=cols=>`<tr><td colspan="${cols}"><div class="empty py-4 text-secondary">Bu aralıkta veri yok</div></td></tr>`;
-let chartPoints=[],searchController;
+let chartPoints=[],searchController,indexLag=0;
 
 async function getJSON(url,options){const r=await fetch(url,options),d=await r.json();if(!r.ok)throw new Error(d.error||'İstek başarısız');return d}
-async function overview(){const d=await getJSON('/api/overview?range='+range());$('[data-k=requests]').textContent=fmt.format(d.requests);$('[data-k=errors]').textContent=fmt.format(d.errors);$('[data-k=error_rate]').textContent=d.error_rate.toFixed(2);$('[data-k=avg_ms]').textContent=fmt.format(Math.round(d.avg_ms));$('[data-k=rps]').textContent=d.rps<1?d.rps.toFixed(2):d.rps.toFixed(1);$('[data-k=bytes]').textContent=size(d.bytes);$('#updated').textContent='Son güncelleme '+new Date(d.updated).toLocaleTimeString('tr-TR')}
+async function overview(){const d=await getJSON('/api/overview?range='+range());indexLag=d.index_lag_seconds||0;$('[data-k=requests]').textContent=fmt.format(d.requests);$('[data-k=errors]').textContent=fmt.format(d.errors);$('[data-k=error_rate]').textContent=d.error_rate.toFixed(2);$('[data-k=avg_ms]').textContent=fmt.format(Math.round(d.avg_ms));$('[data-k=rps]').textContent=d.rps<1?d.rps.toFixed(2):d.rps.toFixed(1);$('[data-k=bytes]').textContent=size(d.bytes);$('#updated').textContent='Son güncelleme '+new Date(d.updated).toLocaleTimeString('tr-TR')}
 async function series(){const d=await getJSON('/api/timeseries?range='+range());chartPoints=d.points;$('#chartPeak').textContent=fmt.format(d.peak);const mins=d.bucket_seconds/60;$('#chartSubtitle').textContent=mins>=60?`${mins/60} saatlik aralıklar`:`${mins} dakikalık aralıklar`;drawChart(chartPoints)}
 async function analytics(){const d=await getJSON('/api/analytics?range='+range());renderEndpoints(d.endpoints);renderBackends(d.backends);renderBars('#statusBars',d.statuses,'status');renderBars('#methodBars',d.methods,'method');renderBars('#platformBars',d.platforms,'platform')}
 
@@ -77,7 +77,7 @@ function drawLine(c,points,color,width){c.beginPath();points.forEach(([x,y],i)=>
 async function logs(){const q=$('#query').value.trim();if(q&&[...q].length<3){$('#count').textContent='Hızlı arama için en az 3 karakter girin';return}searchController?.abort();searchController=new AbortController();const p=new URLSearchParams({q,status:$('#status').value,range:range()});$('#count').textContent=q?'İndekste aranıyor…':'Son kayıtlar yükleniyor…';try{const d=await getJSON('/api/logs?'+p,{signal:searchController.signal});$('#count').textContent=`${fmt.format(d.count)} eşleşme · en yeni ${fmt.format(d.items.length)} kayıt`;$('#rows').innerHTML=d.items.length?d.items.map(x=>`<tr><td class="text-nowrap text-secondary">${new Date(x.timestamp).toLocaleString('tr-TR')}</td><td><div class="fw-medium">${esc(x.client_ip)||'—'}</div><small class="text-secondary font-monospace">→ ${esc(x.server_ip)||'—'}</small></td><td><span class="method">${esc(x.method)||'—'}</span> <span title="${esc(x.uri)}">${esc(x.uri)||'—'}</span></td><td><span class="badge ${statusBadge(x.status)}">${x.status||'—'}</span></td><td class="text-nowrap">${Math.round(x.duration_ms)} ms</td><td class="text-nowrap">${size(x.bytes)}</td></tr>`).join(''):empty(6)}catch(e){if(e.name!=='AbortError')$('#count').textContent='Arama hatası: '+e.message}}
 const REFRESH_SECONDS=5;let refreshIn=REFRESH_SECONDS,isLoading=false;
 async function load(){if(isLoading)return;isLoading=true;refreshIn=REFRESH_SECONDS;document.body.classList.add('loading');$('#liveStatus').textContent='Güncelleniyor…';try{await Promise.all([overview(),series(),analytics(),logs()])}catch(e){$('#count').textContent='Veri alınamadı: '+e.message}finally{isLoading=false;document.body.classList.remove('loading');updateLiveStatus()}}
-function updateLiveStatus(){if(isLoading)return;$('#liveStatus').textContent=`Canlı · ${refreshIn} sn`}
+function updateLiveStatus(){if(isLoading)return;const badge=$('#liveBadge'),behind=indexLag>60;badge.classList.toggle('status-green',!behind);badge.classList.toggle('status-yellow',behind);$('#liveStatus').textContent=behind?`Yetişiyor · ${Math.ceil(indexLag/60)} dk`:`Canlı · ${refreshIn} sn`}
 function autoRefreshTick(){if(document.hidden||isLoading)return;refreshIn--;if(refreshIn<=0)load();else updateLiveStatus()}
 let timer,resizeTimer;$('#query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(logs,400)});$('#status').addEventListener('change',logs);$('#dashboardRange').addEventListener('change',load);$('#refresh').addEventListener('click',load);document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});document.addEventListener('click',e=>{const row=e.target.closest('[data-search]');if(!row)return;$('#query').value=row.dataset.search;logs();document.querySelector('.log-card').scrollIntoView({behavior:'smooth'})});window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>drawChart(chartPoints),100)});load();setInterval(autoRefreshTick,1000);
 </script>
