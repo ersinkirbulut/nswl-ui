@@ -73,6 +73,7 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /api/overview", a.handleOverview)
 	mux.HandleFunc("GET /api/timeseries", a.handleTimeSeries)
+	mux.HandleFunc("GET /api/analytics", a.handleAnalytics)
 	mux.HandleFunc("GET /api/logs", a.handleLogs)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -202,7 +203,8 @@ func isLogFile(name string) bool {
 }
 
 func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
-	o, err := a.store.Overview(r.Context())
+	span, _ := chartRange(r.URL.Query().Get("range"))
+	o, err := a.store.Overview(r.Context(), time.Now(), span)
 	if err != nil {
 		problem(w, http.StatusInternalServerError, err)
 		return
@@ -230,6 +232,8 @@ func chartRange(value string) (time.Duration, time.Duration) {
 		return 6 * time.Hour, 5 * time.Minute
 	case "24h":
 		return 24 * time.Hour, 15 * time.Minute
+	case "7d":
+		return 7 * 24 * time.Hour, time.Hour
 	default:
 		return time.Hour, time.Minute
 	}
@@ -237,9 +241,20 @@ func chartRange(value string) (time.Duration, time.Duration) {
 
 func (a *app) handleLogs(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	result, err := a.store.Search(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("status"), limit)
+	span, _ := chartRange(r.URL.Query().Get("range"))
+	result, err := a.store.Search(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("status"), limit, time.Now(), span)
 	if err != nil {
 		problem(w, http.StatusBadRequest, err)
+		return
+	}
+	respond(w, result)
+}
+
+func (a *app) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	span, _ := chartRange(r.URL.Query().Get("range"))
+	result, err := a.store.Analytics(r.Context(), time.Now(), span)
+	if err != nil {
+		problem(w, http.StatusInternalServerError, err)
 		return
 	}
 	respond(w, result)

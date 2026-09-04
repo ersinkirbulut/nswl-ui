@@ -9,72 +9,73 @@
 </head>
 <body>
 <div class="page">
-  <header class="navbar navbar-expand-md d-print-none glass"><div class="container-xl">
-    <a class="navbar-brand navbar-brand-autodark"><span class="brand-mark">N</span> NSWL <span class="text-secondary ms-1">Lens</span></a>
-    <div class="navbar-nav flex-row order-md-last"><span class="status status-green"><span class="status-dot status-dot-animated"></span>Canlı</span></div>
+  <header class="navbar navbar-expand-md glass"><div class="container-xl">
+    <a class="navbar-brand"><span class="brand-mark">N</span><span>NSWL <span class="text-secondary">Lens</span></span></a>
+    <div class="d-flex align-items-center gap-3"><span class="status status-green"><span class="status-dot status-dot-animated"></span>Canlı</span><span class="text-secondary small d-none d-md-inline" id="updated">Yükleniyor…</span></div>
   </div></header>
-  <div class="page-wrapper">
-    <div class="page-header d-print-none"><div class="container-xl"><div class="row g-2 align-items-center">
-      <div class="col"><div class="page-pretitle">NetScaler Web Logging</div><h2 class="page-title">Trafiğe genel bakış</h2></div>
-      <div class="col-auto text-secondary small" id="updated">Yükleniyor…</div>
+  <main class="page-wrapper">
+    <div class="page-header"><div class="container-xl"><div class="row g-3 align-items-end">
+      <div class="col"><div class="page-pretitle">Operasyon görünümü</div><h1 class="page-title">Trafik analizi</h1><div class="text-secondary mt-1">NetScaler web trafiği, hata eğilimleri ve backend sağlığı</div></div>
+      <div class="col-auto d-flex gap-2">
+        <select id="dashboardRange" class="form-select" aria-label="Dashboard zaman aralığı"><option value="15m">Son 15 dakika</option><option value="1h" selected>Son 1 saat</option><option value="6h">Son 6 saat</option><option value="24h">Son 24 saat</option><option value="7d">Son 7 gün</option></select>
+        <button class="btn btn-white" id="refresh" title="Yenile">↻ <span class="d-none d-sm-inline">Yenile</span></button>
+      </div>
     </div></div></div>
     <div class="page-body"><div class="container-xl">
       <div class="row row-deck row-cards mb-4" id="metrics">
-        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Toplam istek</div><div class="value" data-k="requests">—</div><div class="hint">Okunan log kayıtları</div></div></div></div>
-        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Hatalar</div><div class="value text-red" data-k="errors">—</div><div class="hint">HTTP 4xx ve 5xx</div></div></div></div>
-        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Ort. yanıt</div><div class="value"><span data-k="avg_ms">—</span><small> ms</small></div><div class="hint">İşlem süresi</div></div></div></div>
-        <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Aktarılan</div><div class="value" data-k="bytes">—</div><div class="hint">Sunucudan istemciye</div></div></div></div>
+        <div class="col-sm-6 col-xl-3"><div class="card metric"><div class="card-body"><div class="metric-top"><span class="metric-icon blue">↗</span><span class="label">İstekler</span></div><div class="value" data-k="requests">—</div><div class="hint"><strong data-k="rps">—</strong> ort. istek/sn</div></div></div></div>
+        <div class="col-sm-6 col-xl-3"><div class="card metric"><div class="card-body"><div class="metric-top"><span class="metric-icon red">!</span><span class="label">Hata oranı</span></div><div class="value text-red"><span data-k="error_rate">—</span><small>%</small></div><div class="hint"><strong data-k="errors">—</strong> adet 4xx / 5xx</div></div></div></div>
+        <div class="col-sm-6 col-xl-3"><div class="card metric"><div class="card-body"><div class="metric-top"><span class="metric-icon amber">◷</span><span class="label">Ort. yanıt</span></div><div class="value"><span data-k="avg_ms">—</span><small>ms</small></div><div class="hint">İstek işlem süresi</div></div></div></div>
+        <div class="col-sm-6 col-xl-3"><div class="card metric"><div class="card-body"><div class="metric-top"><span class="metric-icon teal">⇄</span><span class="label">Aktarılan</span></div><div class="value" data-k="bytes">—</div><div class="hint">Sunucudan istemciye trafik</div></div></div></div>
       </div>
+
       <div class="card traffic-card mb-4">
-        <div class="card-header">
-          <div><h3 class="card-title">İstek trafiği</h3><div class="text-secondary small mt-1" id="chartSubtitle">Dakikadaki istek sayısı</div></div>
-          <div class="card-actions d-flex align-items-center gap-3">
-            <div class="chart-stat"><strong id="chartTotal">—</strong><span>toplam</span></div>
-            <div class="chart-stat"><strong id="chartPeak">—</strong><span>zirve</span></div>
-            <select id="chartRange" class="form-select form-select-sm w-auto" aria-label="Grafik zaman aralığı">
-              <option value="15m">Son 15 dk</option><option value="1h" selected>Son 1 saat</option><option value="6h">Son 6 saat</option><option value="24h">Son 24 saat</option>
-            </select>
-          </div>
-        </div>
-        <div class="card-body chart-body"><canvas id="trafficChart" role="img" aria-label="Zamana göre istek sayısı grafiği"></canvas></div>
+        <div class="card-header"><div><h2 class="card-title">İstek ve hata trendi</h2><div class="text-secondary small mt-1" id="chartSubtitle">Dakikalık trafik</div></div><div class="card-actions d-flex align-items-center gap-3"><div class="legend"><span class="legend-dot requests"></span>İstek</div><div class="legend"><span class="legend-dot errors"></span>Hata</div><div class="chart-stat"><strong id="chartPeak">—</strong><span>zirve</span></div></div></div>
+        <div class="card-body chart-body"><canvas id="trafficChart" role="img" aria-label="Zamana göre istek ve hata grafiği"></canvas></div>
       </div>
-      <div class="card">
-        <div class="card-header"><h3 class="card-title">Son istekler</h3><div class="card-actions"><button class="btn btn-ghost-secondary btn-sm" id="refresh">Yenile</button></div></div>
-        <div class="card-body border-bottom py-3"><div class="d-flex gap-2 flex-wrap">
-          <div class="input-icon flex-fill search"><span class="input-icon-addon">⌕</span><input id="query" class="form-control" placeholder="İstemci/backend IP, method veya URI ara…" autocomplete="off"></div>
-          <select id="status" class="form-select w-auto"><option value="">Tüm durumlar</option><option value="2xx">Başarılı (2xx)</option><option value="errors">Hatalar (4xx/5xx)</option></select>
-        </div></div>
-        <div class="table-responsive"><table class="table table-vcenter card-table table-hover"><thead><tr><th>Zaman</th><th>İstemci</th><th>İstek</th><th>Durum</th><th>Süre</th><th>Boyut</th></tr></thead><tbody id="rows"></tbody></table></div>
+
+      <div class="row row-cards mb-4">
+        <div class="col-xl-8"><div class="card h-100"><div class="card-header"><div><h2 class="card-title">En yoğun endpoint’ler</h2><div class="panel-subtitle">Dinamik ID’ler tek endpoint altında birleştirilir</div></div></div><div class="table-responsive"><table class="table card-table table-vcenter insight-table"><thead><tr><th>Endpoint</th><th class="text-end">İstek</th><th class="text-end">Hata</th><th class="text-end">Ort. süre</th></tr></thead><tbody id="topEndpoints"></tbody></table></div></div></div>
+        <div class="col-xl-4"><div class="card h-100"><div class="card-header"><div><h2 class="card-title">HTTP durumları</h2><div class="panel-subtitle">Yanıt kodu dağılımı</div></div></div><div class="card-body"><div id="statusBars" class="bar-list"></div></div></div></div>
+      </div>
+
+      <div class="row row-cards mb-4">
+        <div class="col-xl-7"><div class="card h-100"><div class="card-header"><div><h2 class="card-title">Backend sağlığı</h2><div class="panel-subtitle">Origin sunucularına göre performans</div></div></div><div class="table-responsive"><table class="table card-table table-vcenter insight-table"><thead><tr><th>Backend</th><th class="text-end">İstek</th><th class="text-end">Hata oranı</th><th class="text-end">Ort. süre</th></tr></thead><tbody id="backendHealth"></tbody></table></div></div></div>
+        <div class="col-md-6 col-xl-2"><div class="card h-100"><div class="card-header"><h2 class="card-title">Method</h2></div><div class="card-body"><div id="methodBars" class="bar-list compact"></div></div></div></div>
+        <div class="col-md-6 col-xl-3"><div class="card h-100"><div class="card-header"><h2 class="card-title">İstemci platformu</h2></div><div class="card-body"><div id="platformBars" class="bar-list compact"></div></div></div></div>
+      </div>
+
+      <div class="card log-card">
+        <div class="card-header"><div><h2 class="card-title">Log keşfi</h2><div class="panel-subtitle">İndekslenmiş isteklerde hızlı arama</div></div></div>
+        <div class="card-body border-bottom py-3"><div class="d-flex gap-2 flex-wrap"><div class="input-icon flex-fill search"><span class="input-icon-addon">⌕</span><input id="query" class="form-control" placeholder="İstemci/backend IP, method veya URI ara…" autocomplete="off"></div><select id="status" class="form-select w-auto"><option value="">Tüm durumlar</option><option value="2xx">Başarılı (2xx)</option><option value="errors">Hatalar (4xx/5xx)</option></select></div></div>
+        <div class="table-responsive"><table class="table table-vcenter card-table table-hover"><thead><tr><th>Zaman</th><th>İstemci / Backend</th><th>İstek</th><th>Durum</th><th>Süre</th><th>Boyut</th></tr></thead><tbody id="rows"></tbody></table></div>
         <div class="card-footer text-secondary" id="count">Kayıtlar yükleniyor…</div>
       </div>
     </div></div>
-  </div>
+  </main>
 </div>
 <script>
-const $=s=>document.querySelector(s), fmt=new Intl.NumberFormat('tr-TR');
-const size=n=>{if(!n)return '0 B';const u=['B','KB','MB','GB'],i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3);return `${(n/1024**i).toFixed(i?1:0)} ${u[i]}`};
-const badge=s=>s>=500?'bg-red-lt':s>=400?'bg-orange-lt':s>=300?'bg-azure-lt':'bg-green-lt';
+const $=s=>document.querySelector(s),fmt=new Intl.NumberFormat('tr-TR'),range=()=>$('#dashboardRange').value;
+const size=n=>{if(!n)return'0 B';const u=['B','KB','MB','GB','TB'],i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),4);return`${(n/1024**i).toFixed(i?1:0)} ${u[i]}`};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let chartPoints=[];
-async function overview(){const r=await fetch('/api/overview'),d=await r.json();for(const k of ['requests','errors'])document.querySelector(`[data-k=${k}]`).textContent=fmt.format(d[k]);$('[data-k=avg_ms]').textContent=fmt.format(Math.round(d.avg_ms));$('[data-k=bytes]').textContent=size(d.bytes);$('#updated').textContent='Son güncelleme '+new Date(d.updated).toLocaleTimeString('tr-TR')}
-async function series(){const r=await fetch('/api/timeseries?range='+$('#chartRange').value),d=await r.json();chartPoints=d.points;$('#chartTotal').textContent=fmt.format(d.total);$('#chartPeak').textContent=fmt.format(d.peak);const mins=d.bucket_seconds/60;$('#chartSubtitle').textContent=`${mins} dakikalık aralıklardaki istek sayısı`;drawChart(chartPoints)}
-function drawChart(points){
-  const canvas=$('#trafficChart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(box.width,320),h=box.height;
-  canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
-  const pad={l:48,r:14,t:14,b:30},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b,actualPeak=Math.max(0,...points.map(p=>p.count)),peak=Math.max(1,actualPeak);
-  c.font='11px system-ui';c.textBaseline='middle';c.fillStyle='#98a2b3';c.strokeStyle='#e8edf4';c.lineWidth=1;
-  for(let i=0;i<4;i++){const y=pad.t+ch*i/3;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();if(actualPeak>0||i===3){const label=actualPeak?Math.ceil(actualPeak*(1-i/3)):0;c.textAlign='right';c.fillText(fmt.format(label),pad.l-10,y)}}
-  if(!points.length)return;
-  const xy=points.map((p,i)=>[pad.l+(points.length===1?0:i/(points.length-1))*cw,pad.t+ch-(p.count/peak)*ch]);
-  const gradient=c.createLinearGradient(0,pad.t,0,pad.t+ch);gradient.addColorStop(0,'rgba(37,99,235,.28)');gradient.addColorStop(1,'rgba(37,99,235,0)');
-  c.beginPath();c.moveTo(xy[0][0],pad.t+ch);xy.forEach(([x,y])=>c.lineTo(x,y));c.lineTo(xy.at(-1)[0],pad.t+ch);c.closePath();c.fillStyle=gradient;c.fill();
-  c.beginPath();xy.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.strokeStyle='#2563eb';c.lineWidth=2.5;c.lineJoin='round';c.stroke();
-  c.fillStyle='#667085';c.textAlign='center';c.textBaseline='top';const ticks=[0,.25,.5,.75,1];ticks.forEach(t=>{const i=Math.min(Math.round((points.length-1)*t),points.length-1),x=pad.l+t*cw;c.fillText(new Date(points[i].timestamp).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}),x,pad.t+ch+10)});
-  if(actualPeak===0){c.fillStyle='#98a2b3';c.textAlign='center';c.textBaseline='middle';c.fillText('Bu zaman aralığında istek yok',pad.l+cw/2,pad.t+ch/2)}
-}
-let searchController;
-async function logs(){const q=$('#query').value.trim();if(q&&[...q].length<3){$('#count').textContent='Hızlı arama için en az 3 karakter girin';return}searchController?.abort();searchController=new AbortController();const p=new URLSearchParams({q,status:$('#status').value});$('#count').textContent=q?'İndekste aranıyor…':'Son kayıtlar yükleniyor…';try{const r=await fetch('/api/logs?'+p,{signal:searchController.signal}),d=await r.json();if(!r.ok)throw new Error(d.error||'Arama başarısız');$('#count').textContent=`${fmt.format(d.count)} eşleşme · en yeni ${fmt.format(d.items.length)} kayıt`;$('#rows').innerHTML=d.items.length?d.items.map(x=>`<tr><td class="text-nowrap text-secondary">${x.timestamp?.startsWith('0001')?'—':new Date(x.timestamp).toLocaleString('tr-TR')}</td><td><div class="fw-medium">${esc(x.client_ip)||'—'}</div><small class="text-secondary">${esc(x.host)}</small></td><td><span class="method">${esc(x.method)||'—'}</span> <span title="${esc(x.uri)}">${esc(x.uri)||'—'}</span></td><td><span class="badge ${badge(x.status)}">${x.status||'—'}</span></td><td class="text-nowrap">${Math.round(x.duration_ms)} ms</td><td class="text-nowrap">${size(x.bytes)}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty"><p class="empty-title">Henüz eşleşen kayıt yok</p><p class="empty-subtitle text-secondary">Arama ifadesini veya filtreleri kontrol edin.</p></div></td></tr>`}catch(e){if(e.name!=='AbortError')$('#count').textContent='Arama hatası: '+e.message}}
-async function load(){try{await Promise.all([overview(),series(),logs()])}catch(e){$('#count').textContent='Veri alınamadı: '+e.message}}
-let timer,resizeTimer;$('#query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(logs,400)});$('#status').addEventListener('change',logs);$('#chartRange').addEventListener('change',series);$('#refresh').addEventListener('click',load);window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>drawChart(chartPoints),100)});load();setInterval(load,15000);
+const statusBadge=s=>s>=500?'bg-red-lt':s>=400?'bg-orange-lt':s>=300?'bg-azure-lt':'bg-green-lt';
+const empty=cols=>`<tr><td colspan="${cols}"><div class="empty py-4 text-secondary">Bu aralıkta veri yok</div></td></tr>`;
+let chartPoints=[],searchController;
+
+async function getJSON(url,options){const r=await fetch(url,options),d=await r.json();if(!r.ok)throw new Error(d.error||'İstek başarısız');return d}
+async function overview(){const d=await getJSON('/api/overview?range='+range());$('[data-k=requests]').textContent=fmt.format(d.requests);$('[data-k=errors]').textContent=fmt.format(d.errors);$('[data-k=error_rate]').textContent=d.error_rate.toFixed(2);$('[data-k=avg_ms]').textContent=fmt.format(Math.round(d.avg_ms));$('[data-k=rps]').textContent=d.rps<1?d.rps.toFixed(2):d.rps.toFixed(1);$('[data-k=bytes]').textContent=size(d.bytes);$('#updated').textContent='Son güncelleme '+new Date(d.updated).toLocaleTimeString('tr-TR')}
+async function series(){const d=await getJSON('/api/timeseries?range='+range());chartPoints=d.points;$('#chartPeak').textContent=fmt.format(d.peak);const mins=d.bucket_seconds/60;$('#chartSubtitle').textContent=mins>=60?`${mins/60} saatlik aralıklar`:`${mins} dakikalık aralıklar`;drawChart(chartPoints)}
+async function analytics(){const d=await getJSON('/api/analytics?range='+range());renderEndpoints(d.endpoints);renderBackends(d.backends);renderBars('#statusBars',d.statuses,'status');renderBars('#methodBars',d.methods,'method');renderBars('#platformBars',d.platforms,'platform')}
+
+function renderEndpoints(items){$('#topEndpoints').innerHTML=items.length?items.map(x=>`<tr class="filter-row" data-search="${esc(x.value)}"><td><div class="endpoint" title="${esc(x.value)}">${esc(x.value)}</div></td><td class="text-end fw-semibold">${fmt.format(x.requests)}</td><td class="text-end"><span class="${x.error_rate>=5?'text-red fw-semibold':'text-secondary'}">${x.error_rate.toFixed(1)}%</span></td><td class="text-end">${Math.round(x.avg_ms)} ms</td></tr>`).join(''):empty(4)}
+function renderBackends(items){$('#backendHealth').innerHTML=items.length?items.map(x=>`<tr class="filter-row" data-search="${esc(x.value)}"><td><span class="health-dot ${x.error_rate>=5?'bad':x.error_rate>=1?'warn':'good'}"></span><span class="font-monospace">${esc(x.value)}</span></td><td class="text-end fw-semibold">${fmt.format(x.requests)}</td><td class="text-end ${x.error_rate>=5?'text-red fw-semibold':''}">${x.error_rate.toFixed(1)}%</td><td class="text-end">${Math.round(x.avg_ms)} ms</td></tr>`).join(''):empty(4)}
+function renderBars(selector,items,type){const total=items.reduce((n,x)=>n+x.requests,0)||1;$(selector).innerHTML=items.length?items.map((x,i)=>{const pct=x.requests/total*100,color=type==='status'?(+x.value>=500?'red':+x.value>=400?'orange':+x.value>=300?'azure':'green'):['blue','teal','violet','amber','cyan'][i%5];return`<div class="bar-item"><div class="bar-label"><span>${esc(x.value)}</span><strong>${fmt.format(x.requests)}</strong></div><div class="bar-track"><span class="bar-fill ${color}" style="width:${Math.max(pct,1)}%"></span></div><div class="bar-meta">${pct.toFixed(1)}%${x.errors?` · ${fmt.format(x.errors)} hata`:''}</div></div>`}).join(''):'<div class="text-secondary">Bu aralıkta veri yok</div>'}
+
+function drawChart(points){const canvas=$('#trafficChart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(box.width,320),h=box.height;canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);const pad={l:48,r:14,t:14,b:30},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b,actualPeak=Math.max(0,...points.map(p=>p.count)),peak=Math.max(1,actualPeak);c.font='11px system-ui';c.textBaseline='middle';c.fillStyle='#98a2b3';c.strokeStyle='#e8edf4';c.lineWidth=1;for(let i=0;i<4;i++){const y=pad.t+ch*i/3;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();if(actualPeak>0||i===3){const label=actualPeak?Math.ceil(actualPeak*(1-i/3)):0;c.textAlign='right';c.fillText(fmt.format(label),pad.l-10,y)}}if(!points.length)return;const coords=key=>points.map((p,i)=>[pad.l+(points.length===1?0:i/(points.length-1))*cw,pad.t+ch-(p[key]/peak)*ch]);const requests=coords('count'),errors=coords('errors'),gradient=c.createLinearGradient(0,pad.t,0,pad.t+ch);gradient.addColorStop(0,'rgba(37,99,235,.25)');gradient.addColorStop(1,'rgba(37,99,235,0)');c.beginPath();c.moveTo(requests[0][0],pad.t+ch);requests.forEach(([x,y])=>c.lineTo(x,y));c.lineTo(requests.at(-1)[0],pad.t+ch);c.closePath();c.fillStyle=gradient;c.fill();drawLine(c,requests,'#2563eb',2.5);drawLine(c,errors,'#dc3545',1.8);c.fillStyle='#667085';c.textAlign='center';c.textBaseline='top';[0,.25,.5,.75,1].forEach(t=>{const i=Math.min(Math.round((points.length-1)*t),points.length-1);c.fillText(new Date(points[i].timestamp).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}),pad.l+t*cw,pad.t+ch+10)});if(actualPeak===0){c.fillStyle='#98a2b3';c.textAlign='center';c.textBaseline='middle';c.fillText('Bu zaman aralığında istek yok',pad.l+cw/2,pad.t+ch/2)}}
+function drawLine(c,points,color,width){c.beginPath();points.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.strokeStyle=color;c.lineWidth=width;c.lineJoin='round';c.stroke()}
+
+async function logs(){const q=$('#query').value.trim();if(q&&[...q].length<3){$('#count').textContent='Hızlı arama için en az 3 karakter girin';return}searchController?.abort();searchController=new AbortController();const p=new URLSearchParams({q,status:$('#status').value,range:range()});$('#count').textContent=q?'İndekste aranıyor…':'Son kayıtlar yükleniyor…';try{const d=await getJSON('/api/logs?'+p,{signal:searchController.signal});$('#count').textContent=`${fmt.format(d.count)} eşleşme · en yeni ${fmt.format(d.items.length)} kayıt`;$('#rows').innerHTML=d.items.length?d.items.map(x=>`<tr><td class="text-nowrap text-secondary">${new Date(x.timestamp).toLocaleString('tr-TR')}</td><td><div class="fw-medium">${esc(x.client_ip)||'—'}</div><small class="text-secondary font-monospace">→ ${esc(x.server_ip)||'—'}</small></td><td><span class="method">${esc(x.method)||'—'}</span> <span title="${esc(x.uri)}">${esc(x.uri)||'—'}</span></td><td><span class="badge ${statusBadge(x.status)}">${x.status||'—'}</span></td><td class="text-nowrap">${Math.round(x.duration_ms)} ms</td><td class="text-nowrap">${size(x.bytes)}</td></tr>`).join(''):empty(6)}catch(e){if(e.name!=='AbortError')$('#count').textContent='Arama hatası: '+e.message}}
+async function load(){document.body.classList.add('loading');try{await Promise.all([overview(),series(),analytics(),logs()])}catch(e){$('#count').textContent='Veri alınamadı: '+e.message}finally{document.body.classList.remove('loading')}}
+let timer,resizeTimer;$('#query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(logs,400)});$('#status').addEventListener('change',logs);$('#dashboardRange').addEventListener('change',load);$('#refresh').addEventListener('click',load);document.addEventListener('click',e=>{const row=e.target.closest('[data-search]');if(!row)return;$('#query').value=row.dataset.search;logs();document.querySelector('.log-card').scrollIntoView({behavior:'smooth'})});window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>drawChart(chartPoints),100)});load();setInterval(load,15000);
 </script>
 </body></html>

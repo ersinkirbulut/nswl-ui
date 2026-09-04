@@ -2,6 +2,8 @@
 
 NetScaler Web Logging (NSWL) W3C logları için hafif, salt-okunur bir web arayüzü. Go standart kütüphanesiyle tek binary olarak çalışır; arayüz Tabler kullanır.
 
+Dashboard; global zaman filtresi, istek/hata trendi, hata oranı, ortalama gecikme, trafik hacmi, normalize edilmiş yoğun endpoint'ler, HTTP durum dağılımı, backend sağlığı, method/platform kırılımları ve indeksli log araması sunar.
+
 ## Çalıştırma
 
 `config.json` dosyasındaki portu ve log klasörünü düzenleyin:

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 type Store struct {
 	db       *sql.DB
@@ -31,16 +32,36 @@ const (
 )
 
 type Overview struct {
-	Requests int64     `json:"requests"`
-	Errors   int64     `json:"errors"`
-	Bytes    int64     `json:"bytes"`
-	AvgMS    float64   `json:"avg_ms"`
-	Updated  time.Time `json:"updated"`
+	Requests  int64     `json:"requests"`
+	Errors    int64     `json:"errors"`
+	Bytes     int64     `json:"bytes"`
+	AvgMS     float64   `json:"avg_ms"`
+	ErrorRate float64   `json:"error_rate"`
+	RPS       float64   `json:"rps"`
+	Updated   time.Time `json:"updated"`
 }
 
 type TimePoint struct {
 	Timestamp time.Time `json:"timestamp"`
 	Count     int64     `json:"count"`
+	Errors    int64     `json:"errors"`
+}
+
+type DimensionMetric struct {
+	Value     string  `json:"value"`
+	Requests  int64   `json:"requests"`
+	Errors    int64   `json:"errors"`
+	Bytes     int64   `json:"bytes"`
+	AvgMS     float64 `json:"avg_ms"`
+	ErrorRate float64 `json:"error_rate"`
+}
+
+type Analytics struct {
+	Endpoints []DimensionMetric `json:"endpoints"`
+	Backends  []DimensionMetric `json:"backends"`
+	Methods   []DimensionMetric `json:"methods"`
+	Statuses  []DimensionMetric `json:"statuses"`
+	Platforms []DimensionMetric `json:"platforms"`
 }
 
 type TimeSeries struct {
@@ -103,6 +124,7 @@ DROP TABLE IF EXISTS requests;
 DROP TABLE IF EXISTS sources;
 DROP TABLE IF EXISTS totals;
 DROP TABLE IF EXISTS minute_stats;
+DROP TABLE IF EXISTS dimension_stats;
 `); err != nil {
 			return fmt.Errorf("reset derived index: %w", err)
 		}
@@ -141,6 +163,13 @@ CREATE TABLE IF NOT EXISTS minute_stats (
   bucket INTEGER PRIMARY KEY, requests INTEGER NOT NULL, errors INTEGER NOT NULL,
   bytes INTEGER NOT NULL, duration_total REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS dimension_stats (
+  bucket INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL,
+  requests INTEGER NOT NULL, errors INTEGER NOT NULL, bytes INTEGER NOT NULL,
+  duration_total REAL NOT NULL,
+  PRIMARY KEY(bucket, kind, value)
+);
+CREATE INDEX IF NOT EXISTS idx_dimension_kind_bucket ON dimension_stats(kind, bucket);
 `)
 	if err != nil {
 		return err
@@ -246,7 +275,12 @@ func (s *Store) insertBatch(ctx context.Context, fingerprint, path string, offse
 		requests, errors, bytes int64
 		duration                float64
 	}
+	type dimensionKey struct {
+		bucket      int64
+		kind, value string
+	}
 	minutes := make(map[int64]aggregate)
+	dimensions := make(map[dimensionKey]aggregate)
 	var total aggregate
 	for _, e := range entries {
 		if _, err := stmt.ExecContext(ctx, e.Timestamp.UnixMilli(), e.ClientIP, e.ProxyIP, e.ServerIP, e.Host, e.Method, e.URI, e.Status, e.Bytes, e.Duration, e.UserAgent); err != nil {
@@ -260,11 +294,39 @@ func (s *Store) insertBatch(ctx context.Context, fingerprint, path string, offse
 			a.errors++
 		}
 		minutes[e.Timestamp.Truncate(time.Minute).Unix()] = a
+		minute := e.Timestamp.Truncate(time.Minute).Unix()
+		values := map[string]string{
+			"endpoint": normalizeEndpoint(e.URI),
+			"backend":  e.ServerIP,
+			"method":   e.Method,
+			"status":   strconv.Itoa(e.Status),
+			"platform": detectPlatform(e.UserAgent),
+		}
+		for kind, value := range values {
+			if value == "" || value == "0" {
+				continue
+			}
+			key := dimensionKey{bucket: minute, kind: kind, value: value}
+			d := dimensions[key]
+			d.requests++
+			d.bytes += e.Bytes
+			d.duration += e.Duration
+			if e.Status >= 400 {
+				d.errors++
+			}
+			dimensions[key] = d
+		}
 		total.requests++
 		total.bytes += e.Bytes
 		total.duration += e.Duration
 		if e.Status >= 400 {
 			total.errors++
+		}
+	}
+	for key, a := range dimensions {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO dimension_stats(bucket,kind,value,requests,errors,bytes,duration_total) VALUES(?,?,?,?,?,?,?)
+ON CONFLICT(bucket,kind,value) DO UPDATE SET requests=requests+excluded.requests, errors=errors+excluded.errors, bytes=bytes+excluded.bytes, duration_total=duration_total+excluded.duration_total`, key.bucket, key.kind, key.value, a.requests, a.errors, a.bytes, a.duration); err != nil {
+			return err
 		}
 	}
 	for bucket, a := range minutes {
@@ -281,6 +343,60 @@ ON CONFLICT(fingerprint) DO UPDATE SET path=excluded.path, offset=excluded.offse
 		return err
 	}
 	return tx.Commit()
+}
+
+func normalizeEndpoint(uri string) string {
+	path := strings.SplitN(uri, "?", 2)[0]
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if isIdentifier(part) {
+			parts[i] = ":id"
+		}
+	}
+	return strings.Join(parts, "/")
+}
+
+func isIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	digits := true
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			digits = false
+			break
+		}
+	}
+	if digits {
+		return true
+	}
+	if len(value) >= 24 && strings.Count(value, "-") >= 3 {
+		for _, r := range value {
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') && r != '-' {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func detectPlatform(userAgent string) string {
+	value := strings.ToLower(userAgent)
+	switch {
+	case strings.Contains(value, "x-device-platform: ios") || strings.Contains(value, "iphone") || strings.Contains(value, "ipad"):
+		return "iOS"
+	case strings.Contains(value, "x-device-platform: android") || strings.Contains(value, "android"):
+		return "Android"
+	case strings.Contains(value, "windows"):
+		return "Windows"
+	case strings.Contains(value, "macintosh") || strings.Contains(value, "mac os"):
+		return "macOS"
+	case value != "":
+		return "Diğer"
+	default:
+		return "Bilinmiyor"
+	}
 }
 
 func fileFingerprint(path string) (string, error) {
@@ -300,25 +416,58 @@ func fileFingerprint(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func (s *Store) Overview(ctx context.Context) (Overview, error) {
+func (s *Store) dashboardWindow(ctx context.Context, now time.Time, span, bucket time.Duration) (time.Time, time.Time, error) {
+	end := now.Truncate(bucket).Add(bucket)
+	start := end.Add(-span)
+	var latest sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT max(bucket) FROM minute_stats`).Scan(&latest); err != nil {
+		return start, end, err
+	}
+	if latest.Valid {
+		latestTime := time.Unix(latest.Int64, 0).In(now.Location())
+		if latestTime.Before(start) || !latestTime.Before(end) {
+			end = latestTime.Truncate(bucket).Add(bucket)
+			start = end.Add(-span)
+		}
+	}
+	return start, end, nil
+}
+
+func (s *Store) Overview(ctx context.Context, now time.Time, span time.Duration) (Overview, error) {
 	var o Overview
 	var duration float64
 	var updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT requests,errors,bytes,duration_total,updated_at FROM totals WHERE id=1`).Scan(&o.Requests, &o.Errors, &o.Bytes, &duration, &updated)
+	start, end, err := s.dashboardWindow(ctx, now, span, time.Minute)
+	if err != nil {
+		return o, err
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT coalesce(sum(requests),0),coalesce(sum(errors),0),coalesce(sum(bytes),0),coalesce(sum(duration_total),0) FROM minute_stats WHERE bucket>=? AND bucket<?`, start.Unix(), end.Unix()).Scan(&o.Requests, &o.Errors, &o.Bytes, &duration)
+	if err != nil {
+		return o, err
+	}
+	_ = s.db.QueryRowContext(ctx, `SELECT updated_at FROM totals WHERE id=1`).Scan(&updated)
 	if o.Requests > 0 {
 		o.AvgMS = duration / float64(o.Requests)
+		o.ErrorRate = float64(o.Errors) * 100 / float64(o.Requests)
 	}
+	o.RPS = float64(o.Requests) / span.Seconds()
 	o.Updated = time.Unix(updated, 0)
 	return o, err
 }
 
-func (s *Store) Search(ctx context.Context, query, status string, limit int) (SearchResult, error) {
+func (s *Store) Search(ctx context.Context, query, status string, limit int, now time.Time, span time.Duration) (SearchResult, error) {
 	query = strings.TrimSpace(query)
 	if limit < 1 || limit > 1000 {
 		limit = 200
 	}
 	from, where := `requests r`, []string{"1=1"}
 	args := []any{}
+	start, end, err := s.dashboardWindow(ctx, now, span, time.Minute)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	where = append(where, `r.ts>=? AND r.ts<?`)
+	args = append(args, start.UnixMilli(), end.UnixMilli())
 	if query != "" {
 		if len([]rune(query)) < 3 {
 			return SearchResult{}, fmt.Errorf("search requires at least 3 characters")
@@ -356,33 +505,22 @@ func (s *Store) Search(ctx context.Context, query, status string, limit int) (Se
 }
 
 func (s *Store) Series(ctx context.Context, now time.Time, span, bucket time.Duration) (TimeSeries, error) {
-	end := now.Truncate(bucket).Add(bucket)
-	start := end.Add(-span)
-	var latest sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT max(bucket) FROM minute_stats`).Scan(&latest); err != nil {
+	start, end, err := s.dashboardWindow(ctx, now, span, bucket)
+	if err != nil {
 		return TimeSeries{}, err
-	}
-	if latest.Valid {
-		latestTime := time.Unix(latest.Int64, 0).In(now.Location())
-		// Historical files and timezone mistakes should still produce a useful
-		// chart. Live data within the selected window remains anchored to now.
-		if latestTime.Before(start) || !latestTime.Before(end) {
-			end = latestTime.Truncate(bucket).Add(bucket)
-			start = end.Add(-span)
-		}
 	}
 	series := TimeSeries{Points: make([]TimePoint, int(span/bucket)), BucketSeconds: int(bucket.Seconds())}
 	for i := range series.Points {
 		series.Points[i].Timestamp = start.Add(time.Duration(i) * bucket)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT bucket,requests FROM minute_stats WHERE bucket>=? AND bucket<? ORDER BY bucket`, start.Unix(), end.Unix())
+	rows, err := s.db.QueryContext(ctx, `SELECT bucket,requests,errors FROM minute_stats WHERE bucket>=? AND bucket<? ORDER BY bucket`, start.Unix(), end.Unix())
 	if err != nil {
 		return series, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var minute, requests int64
-		if err := rows.Scan(&minute, &requests); err != nil {
+		var minute, requests, errors int64
+		if err := rows.Scan(&minute, &requests, &errors); err != nil {
 			return series, err
 		}
 		index := int(time.Unix(minute, 0).Sub(start) / bucket)
@@ -390,10 +528,53 @@ func (s *Store) Series(ctx context.Context, now time.Time, span, bucket time.Dur
 			continue
 		}
 		series.Points[index].Count += requests
+		series.Points[index].Errors += errors
 		series.Total += requests
 		if series.Points[index].Count > series.Peak {
 			series.Peak = series.Points[index].Count
 		}
 	}
 	return series, rows.Err()
+}
+
+func (s *Store) Analytics(ctx context.Context, now time.Time, span time.Duration) (Analytics, error) {
+	start, end, err := s.dashboardWindow(ctx, now, span, time.Minute)
+	if err != nil {
+		return Analytics{}, err
+	}
+	result := Analytics{}
+	for _, target := range []struct {
+		kind  string
+		limit int
+		out   *[]DimensionMetric
+	}{{"endpoint", 8, &result.Endpoints}, {"backend", 8, &result.Backends}, {"method", 8, &result.Methods}, {"status", 8, &result.Statuses}, {"platform", 8, &result.Platforms}} {
+		metrics, err := s.dimensionMetrics(ctx, target.kind, start, end, target.limit)
+		if err != nil {
+			return result, err
+		}
+		*target.out = metrics
+	}
+	return result, nil
+}
+
+func (s *Store) dimensionMetrics(ctx context.Context, kind string, start, end time.Time, limit int) ([]DimensionMetric, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT value,sum(requests),sum(errors),sum(bytes),sum(duration_total) FROM dimension_stats WHERE kind=? AND bucket>=? AND bucket<? GROUP BY value ORDER BY sum(requests) DESC LIMIT ?`, kind, start.Unix(), end.Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	metrics := make([]DimensionMetric, 0, limit)
+	for rows.Next() {
+		var metric DimensionMetric
+		var duration float64
+		if err := rows.Scan(&metric.Value, &metric.Requests, &metric.Errors, &metric.Bytes, &duration); err != nil {
+			return metrics, err
+		}
+		if metric.Requests > 0 {
+			metric.AvgMS = duration / float64(metric.Requests)
+			metric.ErrorRate = float64(metric.Errors) * 100 / float64(metric.Requests)
+		}
+		metrics = append(metrics, metric)
+	}
+	return metrics, rows.Err()
 }

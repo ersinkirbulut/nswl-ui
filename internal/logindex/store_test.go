@@ -47,19 +47,39 @@ func TestIngestAndIndexedSearch(t *testing.T) {
 		t.Fatalf("append ingest count=%d err=%v", count, err)
 	}
 
-	result, err := store.Search(ctx, "session/log", "errors", 200)
+	now := time.Date(2026, 9, 4, 15, 29, 0, 0, time.Local)
+	result, err := store.Search(ctx, "session/log", "errors", 200, now, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Count != 1 || len(result.Items) != 1 || result.Items[0].ClientIP != "203.0.113.42" {
 		t.Fatalf("unexpected search: %#v", result)
 	}
-	overview, err := store.Overview(ctx)
+	overview, err := store.Overview(ctx, now, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if overview.Requests != 2 || overview.Errors != 1 || overview.Bytes != 259 {
 		t.Fatalf("unexpected overview: %#v", overview)
+	}
+	analytics, err := store.Analytics(ctx, now, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(analytics.Endpoints) != 2 || len(analytics.Backends) != 2 || len(analytics.Statuses) != 2 {
+		t.Fatalf("unexpected analytics: %#v", analytics)
+	}
+}
+
+func TestNormalizeEndpoint(t *testing.T) {
+	for input, want := range map[string]string{
+		"/v3/player/coupon/7475fac9-1b3d-4aa2-9a91-b010275de0a0/detail?full=true": "/v3/player/coupon/:id/detail",
+		"/v1/items/29187":         "/v1/items/:id",
+		"/v1/banner/landing-orta": "/v1/banner/landing-orta",
+	} {
+		if got := normalizeEndpoint(input); got != want {
+			t.Errorf("normalizeEndpoint(%q)=%q, want %q", input, got, want)
+		}
 	}
 }
 
@@ -86,7 +106,7 @@ func BenchmarkIndexedSearch100K(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		result, err := store.Search(ctx, "target-endpoint", "", 200)
+		result, err := store.Search(ctx, "target-endpoint", "", 200, time.Unix(100_000, 0), 48*time.Hour)
 		if err != nil {
 			b.Fatal(err)
 		}
