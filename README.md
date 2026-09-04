@@ -11,7 +11,7 @@ Dashboard; global zaman filtresi, istek/hata trendi, hata oranı, ortalama gecik
 ```json
 {
   "bind": "127.0.0.1",
-  "port": 8080,
+  "port": 8090,
   "log_path": "./logs",
   "database_path": "./data/nswl.db",
   "index_interval_seconds": 2,
@@ -26,7 +26,7 @@ go build -o nswl-ui ./cmd/nswl-ui
 ./nswl-ui
 ```
 
-Arayüz `http://127.0.0.1:8080` adresindedir. Klasördeki `.txt`, `.log` ve NSWL rotasyon dosyaları (`.log.0`, `.log.1`, …) alt klasörler dahil otomatik bulunur.
+Arayüz `http://127.0.0.1:8090` adresindedir. Klasördeki `.txt`, `.log` ve NSWL rotasyon dosyaları (`.log.0`, `.log.1`, …) alt klasörler dahil otomatik bulunur.
 
 Parser iki biçimi otomatik tanır:
 
@@ -90,10 +90,10 @@ sudo systemctl restart nswl-ui
 sudo journalctl -u nswl-ui -f
 ```
 
-Firewall kullanılıyorsa 8080/TCP portunu yalnızca yönetim ağınıza açın. Örnek olarak herkese açmak için:
+Firewall kullanılıyorsa 8090/TCP portunu yalnızca yönetim ağınıza açın. Örnek olarak herkese açmak için:
 
 ```sh
-sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --permanent --add-port=8090/tcp
 sudo firewall-cmd --reload
 ```
 

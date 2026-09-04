@@ -21,7 +21,7 @@ for command_name in go systemctl install useradd nice; do
 done
 
 LOG_PATH="${1:-}"
-PORT="${2:-8080}"
+PORT="${2:-8090}"
 
 if [[ ! -f "${CONFIG_PATH}" && -z "${LOG_PATH}" ]]; then
   fail "İlk kurulumda log klasörünü verin: sudo ./install.sh /nswl/log/klasoru"

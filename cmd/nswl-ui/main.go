@@ -95,7 +95,7 @@ func main() {
 }
 
 func loadConfig(path string) (config, error) {
-	cfg := config{Bind: "127.0.0.1", Port: 8080, LogPath: "./logs", DatabasePath: "/var/lib/nswl-ui/nswl.db", IndexIntervalSeconds: 2, LogTimezone: "Europe/Istanbul"}
+	cfg := config{Bind: "127.0.0.1", Port: 8090, LogPath: "./logs", DatabasePath: "/var/lib/nswl-ui/nswl.db", IndexIntervalSeconds: 2, LogTimezone: "Europe/Istanbul"}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return config{}, fmt.Errorf("read %s: %w", path, err)
