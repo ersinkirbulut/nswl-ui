@@ -16,7 +16,7 @@ if [[ ${EUID} -ne 0 ]]; then
   fail "Root yetkisi gerekli. sudo ./install.sh /nswl/log/klasoru komutunu kullanın."
 fi
 
-for command_name in go systemctl install useradd; do
+for command_name in go systemctl install useradd nice; do
   command -v "${command_name}" >/dev/null 2>&1 || fail "${command_name} komutu bulunamadı."
 done
 
@@ -44,10 +44,10 @@ trap cleanup EXIT
 
 say "Testler çalıştırılıyor"
 cd "${REPO_DIR}"
-go test ./...
+GOMAXPROCS=2 nice -n 10 go test -p 1 ./...
 
 say "Linux binary derleniyor"
-go build -trimpath -ldflags='-s -w' -o "${BUILD_FILE}" ./cmd/nswl-ui
+GOMAXPROCS=2 nice -n 10 go build -p 1 -trimpath -ldflags='-s -w' -o "${BUILD_FILE}" ./cmd/nswl-ui
 
 say "Servis kullanıcısı hazırlanıyor"
 if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
@@ -61,7 +61,7 @@ mv -f -- "${INSTALL_PATH}.new" "${INSTALL_PATH}"
 install -d -m 0755 "${CONFIG_DIR}"
 if [[ -n "${LOG_PATH}" ]]; then
   CONFIG_TMP="$(mktemp "${TMPDIR:-/tmp}/nswl-ui-config.XXXXXX")"
-  printf '{\n  "bind": "0.0.0.0",\n  "port": %s,\n  "log_path": "%s"\n}\n' "${PORT}" "${LOG_PATH}" >"${CONFIG_TMP}"
+  printf '{\n  "bind": "0.0.0.0",\n  "port": %s,\n  "log_path": "%s",\n  "database_path": "/var/lib/nswl-ui/nswl.db",\n  "index_interval_seconds": 2\n}\n' "${PORT}" "${LOG_PATH}" >"${CONFIG_TMP}"
   install -m 0644 "${CONFIG_TMP}" "${CONFIG_PATH}"
   say "Config oluşturuldu: ${CONFIG_PATH}"
 else

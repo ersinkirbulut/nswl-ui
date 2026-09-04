@@ -10,6 +10,18 @@ Group=nswl-ui
 ExecStart=/usr/local/bin/nswl-ui -config /etc/nswl-ui/config.json
 Restart=on-failure
 RestartSec=3s
+StateDirectory=nswl-ui
+StateDirectoryMode=0750
+Environment=GOMAXPROCS=1
+
+# Initial indexing must never compete with production workloads.
+Nice=10
+CPUQuota=50%
+CPUWeight=10
+IOWeight=10
+MemoryHigh=768M
+MemoryMax=1G
+TasksMax=64
 
 # Basic service hardening. NSWL Lens only needs to read logs and bind a high port.
 NoNewPrivileges=true

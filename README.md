@@ -39,7 +39,18 @@ go build -o nswl-ui ./cmd/nswl-ui
 
 Farklı bir config dosyası gerekirse `./nswl-ui -config /dosya/config.json` kullanılabilir.
 
-Uygulama dosya boyutu ve değişiklik zamanına göre bellekte snapshot tutar. Rotasyondaki değişmeyen büyük dosyalar her yenilemede tekrar parse edilmez; yalnızca aktif veya değişmiş dosyalar okunur. Çok yüksek hacim ve uzun saklama süreleri için sonraki adım kalıcı SQLite indeksidir.
+Uygulama log dosyalarına salt-okunur erişir; işlediği byte konumlarını kalıcı indekste saklar.
+
+## Yüksek hacimli log indeksi
+
+Loglar arama sırasında bellekte taranmaz. Uygulama arka planda SQLite/FTS5 indeksi oluşturur ve aktif log dosyasını iki saniyede bir yalnızca kaldığı byte konumundan okumaya devam eder. Rotasyon dosyaları ilk satır parmak iziyle tanındığı için `.log` dosyasının `.log.0` olarak yeniden adlandırılması aynı kayıtların tekrar eklenmesine neden olmaz.
+
+- İstemci/proxy/backend IP, URI ve method aramaları trigram full-text indeksinden çalışır. Büyük cihaz-header ve user-agent değerleri sonuçlarda gösterilir ancak indeks boyutunu kontrol altında tutmak için arama indeksine eklenmez.
+- Arama en az üç karakterle başlar ve en yeni 200 sonucu döndürür.
+- Toplam metrikler ve dakika grafikleri önceden özetlenir; milyonlarca ana kaydı her yenilemede taramaz.
+- SQLite WAL modu kullanılır ve ayrıca bir veritabanı servisi kurulması gerekmez.
+
+İlk kurulumda mevcut dosyalar arka planda indekslenir. Sonraki açılışlarda kayıtlı byte konumundan devam edilir.
 
 ## Rocky Linux kurulumu ve güncelleme
 

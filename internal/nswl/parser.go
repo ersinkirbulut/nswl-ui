@@ -46,7 +46,7 @@ func Parse(r io.Reader) ([]Entry, error) {
 			continue
 		}
 		if len(fields) == 0 && strings.Contains(line, "|") {
-			if entry, ok := parseNSWLPipe(line); ok {
+			if entry, ok := ParseLine(line); ok {
 				entries = append(entries, entry)
 			}
 			continue
@@ -71,6 +71,12 @@ func Parse(r io.Reader) ([]Entry, error) {
 		return entries, errors.New("missing #Fields directive")
 	}
 	return entries, nil
+}
+
+// ParseLine parses one record from the headerless custom pipe format. It is
+// exported so the persistent indexer can process newly appended lines only.
+func ParseLine(line string) (Entry, bool) {
+	return parseNSWLPipe(line)
 }
 
 // parseNSWLPipe handles the common custom format produced with:

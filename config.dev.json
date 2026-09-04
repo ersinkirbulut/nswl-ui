@@ -1,5 +1,7 @@
 {
   "bind": "127.0.0.1",
   "port": 18080,
-  "log_path": "./logs"
+  "log_path": "./logs",
+  "database_path": "./data/nswl-dev-v2.db",
+  "index_interval_seconds": 2
 }

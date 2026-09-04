@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -9,14 +10,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
-	"nswl-ui/internal/nswl"
+	"nswl-ui/internal/logindex"
 )
 
 //go:embed web/*
@@ -24,40 +26,16 @@ var assets embed.FS
 
 type app struct {
 	logPath  string
-	mu       sync.Mutex
-	files    map[string]cachedFile
-	snapshot []nswl.Entry
-}
-
-type cachedFile struct {
-	size    int64
-	modTime time.Time
-	entries []nswl.Entry
-}
-type overview struct {
-	Requests int       `json:"requests"`
-	Errors   int       `json:"errors"`
-	Bytes    int64     `json:"bytes"`
-	AvgMS    float64   `json:"avg_ms"`
-	Updated  time.Time `json:"updated"`
-}
-
-type timePoint struct {
-	Timestamp time.Time `json:"timestamp"`
-	Count     int       `json:"count"`
-}
-
-type timeSeries struct {
-	Points        []timePoint `json:"points"`
-	BucketSeconds int         `json:"bucket_seconds"`
-	Total         int         `json:"total"`
-	Peak          int         `json:"peak"`
+	store    *logindex.Store
+	indexing atomic.Bool
 }
 
 type config struct {
-	Port    int    `json:"port"`
-	LogPath string `json:"log_path"`
-	Bind    string `json:"bind"`
+	Port                 int    `json:"port"`
+	LogPath              string `json:"log_path"`
+	Bind                 string `json:"bind"`
+	DatabasePath         string `json:"database_path"`
+	IndexIntervalSeconds int    `json:"index_interval_seconds"`
 }
 
 func main() {
@@ -67,7 +45,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("configuration: %v", err)
 	}
-	a := &app{logPath: cfg.LogPath, files: make(map[string]cachedFile)}
+	store, err := logindex.Open(cfg.DatabasePath)
+	if err != nil {
+		log.Fatalf("open index: %v", err)
+	}
+	defer store.Close()
+	a := &app{logPath: cfg.LogPath, store: store}
+
 	mux := http.NewServeMux()
 	web, _ := fs.Sub(assets, "web")
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(web))))
@@ -84,13 +68,27 @@ func main() {
 	mux.HandleFunc("GET /api/overview", a.handleOverview)
 	mux.HandleFunc("GET /api/timeseries", a.handleTimeSeries)
 	mux.HandleFunc("GET /api/logs", a.handleLogs)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	go a.indexLoop(ctx, time.Duration(cfg.IndexIntervalSeconds)*time.Second)
+
 	addr := fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port)
-	log.Printf("NSWL UI listening on %s (logs: %s)", addr, a.logPath)
-	log.Fatal(http.ListenAndServe(addr, securityHeaders(mux)))
+	server := &http.Server{Addr: addr, Handler: securityHeaders(mux), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		log.Printf("NSWL UI listening on %s (logs: %s, index: %s)", addr, a.logPath, cfg.DatabasePath)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server: %v", err)
+		}
+	}()
+	<-ctx.Done()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	_ = server.Shutdown(shutdownCtx)
 }
 
 func loadConfig(path string) (config, error) {
-	cfg := config{Bind: "127.0.0.1", Port: 8080, LogPath: "./logs"}
+	cfg := config{Bind: "127.0.0.1", Port: 8080, LogPath: "./logs", DatabasePath: "/var/lib/nswl-ui/nswl.db", IndexIntervalSeconds: 2}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return config{}, fmt.Errorf("read %s: %w", path, err)
@@ -104,68 +102,56 @@ func loadConfig(path string) (config, error) {
 	if strings.TrimSpace(cfg.LogPath) == "" {
 		return config{}, fmt.Errorf("log_path cannot be empty")
 	}
+	if strings.TrimSpace(cfg.DatabasePath) == "" {
+		return config{}, fmt.Errorf("database_path cannot be empty")
+	}
+	if cfg.IndexIntervalSeconds < 1 || cfg.IndexIntervalSeconds > 300 {
+		return config{}, fmt.Errorf("index_interval_seconds must be between 1 and 300")
+	}
 	if cfg.Bind == "" {
 		cfg.Bind = "127.0.0.1"
 	}
 	return cfg, nil
 }
 
-func (a *app) load() ([]nswl.Entry, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	paths, err := discoverLogFiles(a.logPath)
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]bool, len(paths))
-	var all []nswl.Entry
-	dirty := a.snapshot == nil
-	for _, path := range paths {
-		seen[path] = true
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			continue
-		}
-		cached, exists := a.files[path]
-		if exists && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
-			all = append(all, cached.entries...)
-			continue
-		}
-		dirty = true
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		rows, parseErr := nswl.Parse(f)
-		_ = f.Close()
-		if parseErr != nil {
-			log.Printf("skip %s: %v", path, parseErr)
-			if exists {
-				all = append(all, cached.entries...)
-			}
-			continue
-		}
-		a.files[path] = cachedFile{size: info.Size(), modTime: info.ModTime(), entries: rows}
-		all = append(all, rows...)
-	}
-	for path := range a.files {
-		if !seen[path] {
-			delete(a.files, path)
-			dirty = true
+func (a *app) indexLoop(ctx context.Context, interval time.Duration) {
+	a.syncLogs(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.syncLogs(ctx)
 		}
 	}
-	if !dirty {
-		return a.snapshot, nil
-	}
-	sort.Slice(all, func(i, j int) bool { return all[i].Timestamp.After(all[j].Timestamp) })
-	a.snapshot = all
-	return all, nil
 }
 
-// discoverLogFiles accepts a directory, a single file, or a glob. Directories
-// are scanned recursively because NSWL installations commonly rotate into
-// date- or virtual-server-based subdirectories.
+func (a *app) syncLogs(ctx context.Context) {
+	if !a.indexing.CompareAndSwap(false, true) {
+		return
+	}
+	defer a.indexing.Store(false)
+	paths, err := discoverLogFiles(a.logPath)
+	if err != nil {
+		log.Printf("index scan: %v", err)
+		return
+	}
+	indexed := 0
+	for _, path := range paths {
+		count, err := a.store.IngestFile(ctx, path)
+		if err != nil {
+			log.Printf("index %s: %v", path, err)
+			continue
+		}
+		indexed += count
+	}
+	if indexed > 0 {
+		log.Printf("indexed %d new requests from %d files", indexed, len(paths))
+	}
+}
+
 func discoverLogFiles(path string) ([]string, error) {
 	if strings.ContainsAny(path, "*?[") {
 		return filepath.Glob(path)
@@ -185,10 +171,7 @@ func discoverLogFiles(path string) ([]string, error) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() {
-			return nil
-		}
-		if isLogFile(entry.Name()) {
+		if !entry.IsDir() && isLogFile(entry.Name()) {
 			paths = append(paths, filePath)
 		}
 		return nil
@@ -201,7 +184,6 @@ func isLogFile(name string) bool {
 	if strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, ".log") {
 		return true
 	}
-	// NSWL size rotation produces names such as Ex260904.log.0 and .log.1.
 	marker := strings.LastIndex(name, ".log.")
 	if marker < 0 || marker+5 == len(name) {
 		return false
@@ -210,34 +192,23 @@ func isLogFile(name string) bool {
 	return err == nil
 }
 
-func (a *app) handleOverview(w http.ResponseWriter, _ *http.Request) {
-	rows, err := a.load()
+func (a *app) handleOverview(w http.ResponseWriter, r *http.Request) {
+	o, err := a.store.Overview(r.Context())
 	if err != nil {
-		problem(w, err)
+		problem(w, http.StatusInternalServerError, err)
 		return
-	}
-	o := overview{Requests: len(rows), Updated: time.Now()}
-	for _, e := range rows {
-		if e.Status >= 400 {
-			o.Errors++
-		}
-		o.Bytes += e.Bytes
-		o.AvgMS += e.Duration
-	}
-	if o.Requests > 0 {
-		o.AvgMS /= float64(o.Requests)
 	}
 	respond(w, o)
 }
 
 func (a *app) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.load()
+	span, bucket := chartRange(r.URL.Query().Get("range"))
+	series, err := a.store.Series(r.Context(), time.Now(), span, bucket)
 	if err != nil {
-		problem(w, err)
+		problem(w, http.StatusInternalServerError, err)
 		return
 	}
-	span, bucket := chartRange(r.URL.Query().Get("range"))
-	respond(w, buildTimeSeries(rows, time.Now(), span, bucket))
+	respond(w, series)
 }
 
 func chartRange(value string) (time.Duration, time.Duration) {
@@ -255,68 +226,27 @@ func chartRange(value string) (time.Duration, time.Duration) {
 	}
 }
 
-func buildTimeSeries(rows []nswl.Entry, now time.Time, span, bucket time.Duration) timeSeries {
-	end := now.Truncate(bucket).Add(bucket)
-	start := end.Add(-span)
-	series := timeSeries{
-		Points:        make([]timePoint, int(span/bucket)),
-		BucketSeconds: int(bucket.Seconds()),
-	}
-	for i := range series.Points {
-		series.Points[i].Timestamp = start.Add(time.Duration(i) * bucket)
-	}
-	for _, row := range rows {
-		if row.Timestamp.Before(start) || !row.Timestamp.Before(end) {
-			continue
-		}
-		index := int(row.Timestamp.Sub(start) / bucket)
-		series.Points[index].Count++
-		series.Total++
-		if series.Points[index].Count > series.Peak {
-			series.Peak = series.Points[index].Count
-		}
-	}
-	return series
-}
-
 func (a *app) handleLogs(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.load()
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	result, err := a.store.Search(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("status"), limit)
 	if err != nil {
-		problem(w, err)
+		problem(w, http.StatusBadRequest, err)
 		return
 	}
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	status := r.URL.Query().Get("status")
-	filtered := make([]nswl.Entry, 0, len(rows))
-	for _, e := range rows {
-		if q != "" && !strings.Contains(strings.ToLower(e.ClientIP+" "+e.Host+" "+e.Method+" "+e.URI+" "+e.UserAgent), q) {
-			continue
-		}
-		if status == "errors" && e.Status < 400 {
-			continue
-		}
-		if status == "2xx" && (e.Status < 200 || e.Status >= 300) {
-			continue
-		}
-		filtered = append(filtered, e)
-	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 1000 {
-		limit = 200
-	}
-	if len(filtered) > limit {
-		filtered = filtered[:limit]
-	}
-	respond(w, map[string]any{"items": filtered, "count": len(filtered)})
+	respond(w, result)
 }
 
 func respond(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
 }
-func problem(w http.ResponseWriter, err error) {
-	http.Error(w, fmt.Sprintf(`{"error":%q}`, err), http.StatusInternalServerError)
+
+func problem(w http.ResponseWriter, status int, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

@@ -1,5 +1,7 @@
 {
   "bind": "0.0.0.0",
   "port": 8080,
-  "log_path": "/var/log/nswl"
+  "log_path": "/var/log/nswl",
+  "database_path": "/var/lib/nswl-ui/nswl.db",
+  "index_interval_seconds": 2
 }
