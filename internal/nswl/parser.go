@@ -89,7 +89,7 @@ func parseNSWLPipe(line string) (Entry, bool) {
 	for i := range parts {
 		parts[i] = dash(strings.TrimSpace(parts[i]))
 	}
-	ts, err := time.Parse("2006-01-02 15:04:05", parts[0])
+	ts, err := time.ParseInLocation("2006-01-02 15:04:05", parts[0], time.Local)
 	if err != nil {
 		return Entry{}, false
 	}
@@ -171,7 +171,7 @@ func normalize(m map[string]string) Entry {
 	d := first(m, "date")
 	t := first(m, "time")
 	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04:05.000", time.RFC3339} {
-		if parsed, err := time.Parse(layout, strings.TrimSpace(d+" "+t)); err == nil {
+		if parsed, err := time.ParseInLocation(layout, strings.TrimSpace(d+" "+t), time.Local); err == nil {
 			e.Timestamp = parsed
 			break
 		}

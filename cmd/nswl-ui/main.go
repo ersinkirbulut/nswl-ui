@@ -23,9 +23,10 @@ import (
 var assets embed.FS
 
 type app struct {
-	logPath string
-	mu      sync.Mutex
-	files   map[string]cachedFile
+	logPath  string
+	mu       sync.Mutex
+	files    map[string]cachedFile
+	snapshot []nswl.Entry
 }
 
 type cachedFile struct {
@@ -39,6 +40,18 @@ type overview struct {
 	Bytes    int64     `json:"bytes"`
 	AvgMS    float64   `json:"avg_ms"`
 	Updated  time.Time `json:"updated"`
+}
+
+type timePoint struct {
+	Timestamp time.Time `json:"timestamp"`
+	Count     int       `json:"count"`
+}
+
+type timeSeries struct {
+	Points        []timePoint `json:"points"`
+	BucketSeconds int         `json:"bucket_seconds"`
+	Total         int         `json:"total"`
+	Peak          int         `json:"peak"`
 }
 
 type config struct {
@@ -69,6 +82,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /api/overview", a.handleOverview)
+	mux.HandleFunc("GET /api/timeseries", a.handleTimeSeries)
 	mux.HandleFunc("GET /api/logs", a.handleLogs)
 	addr := fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port)
 	log.Printf("NSWL UI listening on %s (logs: %s)", addr, a.logPath)
@@ -106,6 +120,7 @@ func (a *app) load() ([]nswl.Entry, error) {
 	}
 	seen := make(map[string]bool, len(paths))
 	var all []nswl.Entry
+	dirty := a.snapshot == nil
 	for _, path := range paths {
 		seen[path] = true
 		info, statErr := os.Stat(path)
@@ -117,6 +132,7 @@ func (a *app) load() ([]nswl.Entry, error) {
 			all = append(all, cached.entries...)
 			continue
 		}
+		dirty = true
 		f, err := os.Open(path)
 		if err != nil {
 			continue
@@ -125,6 +141,9 @@ func (a *app) load() ([]nswl.Entry, error) {
 		_ = f.Close()
 		if parseErr != nil {
 			log.Printf("skip %s: %v", path, parseErr)
+			if exists {
+				all = append(all, cached.entries...)
+			}
 			continue
 		}
 		a.files[path] = cachedFile{size: info.Size(), modTime: info.ModTime(), entries: rows}
@@ -133,9 +152,14 @@ func (a *app) load() ([]nswl.Entry, error) {
 	for path := range a.files {
 		if !seen[path] {
 			delete(a.files, path)
+			dirty = true
 		}
 	}
+	if !dirty {
+		return a.snapshot, nil
+	}
 	sort.Slice(all, func(i, j int) bool { return all[i].Timestamp.After(all[j].Timestamp) })
+	a.snapshot = all
 	return all, nil
 }
 
@@ -206,6 +230,55 @@ func (a *app) handleOverview(w http.ResponseWriter, _ *http.Request) {
 	respond(w, o)
 }
 
+func (a *app) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.load()
+	if err != nil {
+		problem(w, err)
+		return
+	}
+	span, bucket := chartRange(r.URL.Query().Get("range"))
+	respond(w, buildTimeSeries(rows, time.Now(), span, bucket))
+}
+
+func chartRange(value string) (time.Duration, time.Duration) {
+	switch value {
+	case "15m":
+		return 15 * time.Minute, time.Minute
+	case "1h":
+		return time.Hour, time.Minute
+	case "6h":
+		return 6 * time.Hour, 5 * time.Minute
+	case "24h":
+		return 24 * time.Hour, 15 * time.Minute
+	default:
+		return time.Hour, time.Minute
+	}
+}
+
+func buildTimeSeries(rows []nswl.Entry, now time.Time, span, bucket time.Duration) timeSeries {
+	end := now.Truncate(bucket).Add(bucket)
+	start := end.Add(-span)
+	series := timeSeries{
+		Points:        make([]timePoint, int(span/bucket)),
+		BucketSeconds: int(bucket.Seconds()),
+	}
+	for i := range series.Points {
+		series.Points[i].Timestamp = start.Add(time.Duration(i) * bucket)
+	}
+	for _, row := range rows {
+		if row.Timestamp.Before(start) || !row.Timestamp.Before(end) {
+			continue
+		}
+		index := int(row.Timestamp.Sub(start) / bucket)
+		series.Points[index].Count++
+		series.Total++
+		if series.Points[index].Count > series.Peak {
+			series.Peak = series.Points[index].Count
+		}
+	}
+	return series
+}
+
 func (a *app) handleLogs(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.load()
 	if err != nil {
@@ -214,7 +287,7 @@ func (a *app) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	status := r.URL.Query().Get("status")
-	filtered := rows[:0]
+	filtered := make([]nswl.Entry, 0, len(rows))
 	for _, e := range rows {
 		if q != "" && !strings.Contains(strings.ToLower(e.ClientIP+" "+e.Host+" "+e.Method+" "+e.URI+" "+e.UserAgent), q) {
 			continue

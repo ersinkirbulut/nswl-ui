@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"nswl-ui/internal/nswl"
 )
 
 func TestDiscoverRotatedLogFiles(t *testing.T) {
@@ -19,6 +22,20 @@ func TestDiscoverRotatedLogFiles(t *testing.T) {
 	}
 	if len(paths) != 4 {
 		t.Fatalf("got %d files: %v", len(paths), paths)
+	}
+}
+
+func TestBuildTimeSeries(t *testing.T) {
+	now := time.Date(2026, 9, 4, 15, 30, 15, 0, time.Local)
+	rows := []nswl.Entry{
+		{Timestamp: now.Add(-30 * time.Second)},
+		{Timestamp: now.Add(-45 * time.Second)},
+		{Timestamp: now.Add(-2 * time.Minute)},
+		{Timestamp: now.Add(-2 * time.Hour)},
+	}
+	series := buildTimeSeries(rows, now, 15*time.Minute, time.Minute)
+	if len(series.Points) != 15 || series.Total != 3 || series.Peak != 2 || series.BucketSeconds != 60 {
+		t.Fatalf("unexpected series: %#v", series)
 	}
 }
 

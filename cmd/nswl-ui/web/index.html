@@ -25,6 +25,19 @@
         <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Ort. yanıt</div><div class="value"><span data-k="avg_ms">—</span><small> ms</small></div><div class="hint">İşlem süresi</div></div></div></div>
         <div class="col-sm-6 col-lg-3"><div class="card metric"><div class="card-body"><div class="label">Aktarılan</div><div class="value" data-k="bytes">—</div><div class="hint">Sunucudan istemciye</div></div></div></div>
       </div>
+      <div class="card traffic-card mb-4">
+        <div class="card-header">
+          <div><h3 class="card-title">İstek trafiği</h3><div class="text-secondary small mt-1" id="chartSubtitle">Dakikadaki istek sayısı</div></div>
+          <div class="card-actions d-flex align-items-center gap-3">
+            <div class="chart-stat"><strong id="chartTotal">—</strong><span>toplam</span></div>
+            <div class="chart-stat"><strong id="chartPeak">—</strong><span>zirve</span></div>
+            <select id="chartRange" class="form-select form-select-sm w-auto" aria-label="Grafik zaman aralığı">
+              <option value="15m">Son 15 dk</option><option value="1h" selected>Son 1 saat</option><option value="6h">Son 6 saat</option><option value="24h">Son 24 saat</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body chart-body"><canvas id="trafficChart" role="img" aria-label="Zamana göre istek sayısı grafiği"></canvas></div>
+      </div>
       <div class="card">
         <div class="card-header"><h3 class="card-title">Son istekler</h3><div class="card-actions"><button class="btn btn-ghost-secondary btn-sm" id="refresh">Yenile</button></div></div>
         <div class="card-body border-bottom py-3"><div class="d-flex gap-2 flex-wrap">
@@ -42,9 +55,25 @@ const $=s=>document.querySelector(s), fmt=new Intl.NumberFormat('tr-TR');
 const size=n=>{if(!n)return '0 B';const u=['B','KB','MB','GB'],i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3);return `${(n/1024**i).toFixed(i?1:0)} ${u[i]}`};
 const badge=s=>s>=500?'bg-red-lt':s>=400?'bg-orange-lt':s>=300?'bg-azure-lt':'bg-green-lt';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let chartPoints=[];
 async function overview(){const r=await fetch('/api/overview'),d=await r.json();for(const k of ['requests','errors'])document.querySelector(`[data-k=${k}]`).textContent=fmt.format(d[k]);$('[data-k=avg_ms]').textContent=fmt.format(Math.round(d.avg_ms));$('[data-k=bytes]').textContent=size(d.bytes);$('#updated').textContent='Son güncelleme '+new Date(d.updated).toLocaleTimeString('tr-TR')}
+async function series(){const r=await fetch('/api/timeseries?range='+$('#chartRange').value),d=await r.json();chartPoints=d.points;$('#chartTotal').textContent=fmt.format(d.total);$('#chartPeak').textContent=fmt.format(d.peak);const mins=d.bucket_seconds/60;$('#chartSubtitle').textContent=`${mins} dakikalık aralıklardaki istek sayısı`;drawChart(chartPoints)}
+function drawChart(points){
+  const canvas=$('#trafficChart'),box=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(box.width,320),h=box.height;
+  canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);
+  const pad={l:48,r:14,t:14,b:30},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b,peak=Math.max(1,...points.map(p=>p.count));
+  c.font='11px system-ui';c.textBaseline='middle';c.fillStyle='#98a2b3';c.strokeStyle='#e8edf4';c.lineWidth=1;
+  for(let i=0;i<4;i++){const y=pad.t+ch*i/3;c.beginPath();c.moveTo(pad.l,y);c.lineTo(w-pad.r,y);c.stroke();const label=Math.round(peak*(1-i/3));c.textAlign='right';c.fillText(fmt.format(label),pad.l-10,y)}
+  if(!points.length)return;
+  const xy=points.map((p,i)=>[pad.l+(points.length===1?0:i/(points.length-1))*cw,pad.t+ch-(p.count/peak)*ch]);
+  const gradient=c.createLinearGradient(0,pad.t,0,pad.t+ch);gradient.addColorStop(0,'rgba(37,99,235,.28)');gradient.addColorStop(1,'rgba(37,99,235,0)');
+  c.beginPath();c.moveTo(xy[0][0],pad.t+ch);xy.forEach(([x,y])=>c.lineTo(x,y));c.lineTo(xy.at(-1)[0],pad.t+ch);c.closePath();c.fillStyle=gradient;c.fill();
+  c.beginPath();xy.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.strokeStyle='#2563eb';c.lineWidth=2.5;c.lineJoin='round';c.stroke();
+  c.fillStyle='#667085';c.textAlign='center';c.textBaseline='top';const ticks=[0,.25,.5,.75,1];ticks.forEach(t=>{const i=Math.min(Math.round((points.length-1)*t),points.length-1),x=pad.l+t*cw;c.fillText(new Date(points[i].timestamp).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'}),x,pad.t+ch+10)});
+  if(Math.max(...points.map(p=>p.count))===0){c.fillStyle='#98a2b3';c.textAlign='center';c.textBaseline='middle';c.fillText('Bu zaman aralığında istek yok',pad.l+cw/2,pad.t+ch/2)}
+}
 async function logs(){const p=new URLSearchParams({q:$('#query').value,status:$('#status').value});const r=await fetch('/api/logs?'+p),d=await r.json();$('#count').textContent=`${fmt.format(d.count)} kayıt gösteriliyor`;$('#rows').innerHTML=d.items.length?d.items.map(x=>`<tr><td class="text-nowrap text-secondary">${x.timestamp?.startsWith('0001')?'—':new Date(x.timestamp).toLocaleString('tr-TR')}</td><td><div class="fw-medium">${esc(x.client_ip)||'—'}</div><small class="text-secondary">${esc(x.host)}</small></td><td><span class="method">${esc(x.method)||'—'}</span> <span title="${esc(x.uri)}">${esc(x.uri)||'—'}</span></td><td><span class="badge ${badge(x.status)}">${x.status||'—'}</span></td><td class="text-nowrap">${Math.round(x.duration_ms)} ms</td><td class="text-nowrap">${size(x.bytes)}</td></tr>`).join(''):`<tr><td colspan="6"><div class="empty"><p class="empty-title">Henüz eşleşen kayıt yok</p><p class="empty-subtitle text-secondary">Log yolunu veya filtreleri kontrol edin.</p></div></td></tr>`}
-async function load(){try{await Promise.all([overview(),logs()])}catch(e){$('#count').textContent='Veri alınamadı: '+e.message}}
-let timer;$('#query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(logs,250)});$('#status').addEventListener('change',logs);$('#refresh').addEventListener('click',load);load();setInterval(load,15000);
+async function load(){try{await Promise.all([overview(),series(),logs()])}catch(e){$('#count').textContent='Veri alınamadı: '+e.message}}
+let timer,resizeTimer;$('#query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(logs,250)});$('#status').addEventListener('change',logs);$('#chartRange').addEventListener('change',series);$('#refresh').addEventListener('click',load);window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>drawChart(chartPoints),100)});load();setInterval(load,15000);
 </script>
 </body></html>
