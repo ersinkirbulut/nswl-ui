@@ -189,6 +189,13 @@ func (s *Store) sourceOffset(ctx context.Context, fingerprint string) (int64, er
 
 // IngestFile reads only complete lines appended since the previous sync.
 func (s *Store) IngestFile(ctx context.Context, path string) (int, error) {
+	return s.IngestFileLimit(ctx, path, 0)
+}
+
+// IngestFileLimit indexes at most maxEntries complete records. A zero limit
+// drains the file. Bounded calls let live logs and historical backfill share
+// indexing time without one large rotation file starving the active file.
+func (s *Store) IngestFileLimit(ctx context.Context, path string, maxEntries int) (int, error) {
 	fingerprint, err := fileFingerprint(path)
 	if err != nil {
 		return 0, err
@@ -237,6 +244,9 @@ func (s *Store) IngestFile(ctx context.Context, path string) (int, error) {
 			}
 			ingested += len(batch)
 			batch = batch[:0]
+			if maxEntries > 0 && ingested >= maxEntries {
+				return ingested, nil
+			}
 			// Historical imports are deliberately paced. Live traffic normally
 			// does not fill a batch between syncs and is therefore not delayed.
 			timer := time.NewTimer(ingestBatchPause)

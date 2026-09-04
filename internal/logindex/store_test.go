@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,5 +164,33 @@ func TestSeriesAnchorsToLatestHistoricalData(t *testing.T) {
 	}
 	if series.Total != 1 || series.Peak != 1 {
 		t.Fatalf("historical series should contain latest data: %#v", series)
+	}
+}
+
+func TestIngestFileLimitContinuesFromSavedOffset(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "index.db"), time.Local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var content strings.Builder
+	for i := 0; i < 600; i++ {
+		fmt.Fprintf(&content, "\"2026-09-04 15:28:31|104.23.239.69|443|%d|-|151.250.12.216|HTTP/1.1|172.22.62.88|80|GET|/v1/items/%d|-|200|0|83|40371|Mozilla/5.0|-|-\"\n", 10000+i, i)
+	}
+	logPath := filepath.Join(dir, "active.log")
+	if err := os.WriteFile(logPath, []byte(content.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if count, err := store.IngestFileLimit(ctx, logPath, 500); err != nil || count != 500 {
+		t.Fatalf("first chunk count=%d err=%v", count, err)
+	}
+	if count, err := store.IngestFileLimit(ctx, logPath, 500); err != nil || count != 100 {
+		t.Fatalf("second chunk count=%d err=%v", count, err)
+	}
+	overview, err := store.Overview(ctx, time.Date(2026, 9, 4, 15, 29, 0, 0, time.Local), time.Hour)
+	if err != nil || overview.Requests != 600 {
+		t.Fatalf("overview=%#v err=%v", overview, err)
 	}
 }

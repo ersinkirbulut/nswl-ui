@@ -22,6 +22,15 @@ func TestDiscoverRotatedLogFiles(t *testing.T) {
 	}
 }
 
+func TestActiveLogDetection(t *testing.T) {
+	if !isActiveLog("/var/log/nswl/Ex260904.log") {
+		t.Fatal("current .log file should be active")
+	}
+	if isActiveLog("/var/log/nswl/Ex260904.log.0") {
+		t.Fatal("rotated .log.0 file should be backfill")
+	}
+}
+
 func TestLoadConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"bind":"0.0.0.0","port":9090,"log_path":"/var/log/nswl"}`), 0o600); err != nil {

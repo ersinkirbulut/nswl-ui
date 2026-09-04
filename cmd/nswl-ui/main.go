@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -148,9 +149,16 @@ func (a *app) syncLogs(ctx context.Context) {
 		log.Printf("index scan: %v", err)
 		return
 	}
+	sort.SliceStable(paths, func(i, j int) bool {
+		return isActiveLog(paths[i]) && !isActiveLog(paths[j])
+	})
 	indexed := 0
 	for _, path := range paths {
-		count, err := a.store.IngestFile(ctx, path)
+		limit := 500
+		if isActiveLog(path) {
+			limit = 5000
+		}
+		count, err := a.store.IngestFileLimit(ctx, path, limit)
 		if err != nil {
 			log.Printf("index %s: %v", path, err)
 			continue
@@ -160,6 +168,11 @@ func (a *app) syncLogs(ctx context.Context) {
 	if indexed > 0 {
 		log.Printf("indexed %d new requests from %d files", indexed, len(paths))
 	}
+}
+
+func isActiveLog(path string) bool {
+	name := strings.ToLower(filepath.Base(path))
+	return strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".txt")
 }
 
 func discoverLogFiles(path string) ([]string, error) {
